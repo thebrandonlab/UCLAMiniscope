@@ -1,0 +1,91 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+launchSettings.json
+
+# Build results
+[Bb]in/
+[Oo]bj/
+
+# Dev
+dev/
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+.nuget/
+
+# Rider
+.idea/
+*.sln.iml
+
+# Visual Studio Code
+.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*~
+*.tmp
+
+# Test results
+TestResults/
+
+# VS cache
+.vsconfig
+
+# DotCover
+*.dotCover
+
+# Native binaries
+*.dll
+*.so
+*.dylib
+
+# Bonsai / other package-generated folders
+packages/
+
+# GitHub workflows build artifacts
+.github/workflows/*.log
+
+# MonoDevelop
+*.userprefs
+
+# Rider caches
+.idea/
+
+# ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+
+# Rider and other IDE caches
+*.sublime-workspace
+
+# Rider caches
+.idea/
+
+# User secrets
+secrets.json
+
+# Coverage
+coverage*/
+
+# Lock files
+project.lock.json
+
+# Windows image file caches
+ehthumbs.db
+
+# Ensure not to ignore source files accidentally
+!**/*.cs
+!**/*.csproj
+!**/*.sln

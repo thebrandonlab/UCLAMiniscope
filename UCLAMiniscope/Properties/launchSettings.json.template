@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "BonsaiDebug": {
+      "commandName": "Executable",
+      "executablePath": "<PATH_TO_BONSAI_EXE>",
+      "commandLineArgs": ""
+    }
+  }
+}
