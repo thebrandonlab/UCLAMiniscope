@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Bonsai": {
+      "commandName": "Executable",
+      "executablePath": "<PATH_TO_BONSAI_EXE>",
+      "commandLineArgs": "--lib $(TargetDir)",
+      "nativeDebugging": true
+    }
+  }
+}
