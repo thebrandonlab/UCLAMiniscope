@@ -28,8 +28,8 @@ namespace UCLAMiniscope
         [Description("Specifies the optional interpolation method if resizing video frames.")]
         public SubPixelInterpolation ResizeInterpolation { get; set; }
 
-        [Description("The number of frames per video segment.")]
-        public int SegmentFrames { get; set; } = 1000;
+        [Description("The number of frames per video segment. Set to 0 for no segmentation (default)")]
+        public int SegmentFrames { get; set; } = 0;
 
         int segmentIndex = 0;
         int frameCount = 0;
@@ -86,6 +86,10 @@ namespace UCLAMiniscope
 
         public override IObservable<IplImage> Process(IObservable<IplImage> source)
         {
+            if (SegmentFrames == 0) {
+                SegmentFrames = int.MaxValue;
+            }
+
             return Observable.Create<IplImage>(observer =>
             {
                 var sub = source.Subscribe(input =>

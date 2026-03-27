@@ -41,7 +41,7 @@ namespace UCLAMiniscope
 
         [Description("Number of frames to hold as reference.")]
         [Range(1, 1024)]
-        public int BufferCapacity { get; set; } = 128;
+        public int BufferCapacity { get; set; } = 64;
 
         [Description("Number of frames before updating the baseline.")]
         public int UpdateFrequency { get; set; } = 10;
@@ -132,8 +132,8 @@ namespace UCLAMiniscope
                 if (baseline != null)
                 {
                     CV.Div(input, baseline, ratio);
-                    CV.ConvertScale(ratio, ratio, 1.0, -0.98); // subtract 1 and add 0.02 → -0.98 (scale 1, shift -0.98)
-                    CV.ConvertScale(ratio, result, 256.0 * Gain, 0.0); // multiply by 256*10 and squeeze to 8-bit
+                    CV.ConvertScale(ratio, ratio, 1.0, -0.98); // subtract 1 and add 0.02
+                    CV.ConvertScale(ratio, result, 256.0 * Gain, 0.0); // multiply by 256 and squeeze to 8-bit
                 }
 
                 return result;

@@ -3,7 +3,7 @@ Description:
 Based on the official Bonsai.FFmepg VideoWriter operator, but with the following fixes:
   - Changed the very long 1 second delay before starting the ffmpeg process to a much shorter 10 ms delay,
     which should be sufficient for the ImageWriter to start writing frames to the pipe on most hardware,
-    and removes the 1 second freeze at the start of recording.
+    removing the 1 second freeze at the start of recording.
   - Added 16 bit grayscale support.
 */
 

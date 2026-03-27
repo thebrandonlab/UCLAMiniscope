@@ -11,16 +11,24 @@ Magik configuration - I2C Address Map
 --------------------------------------------
 0xC0       0b1100000       Deserializer
 0xB0       0b1011000       Serializer
-0xA0       0b1010000       TPL0102 Digital potentiometer
-0x58       0b0101100       TPL0102 Digital potentiometer (sudo)
-0x50       0b0101000       BNO055
-0xEE       0b1110111       MAX14574 EWL driver
-0x20       0b0010000       ATTINY MCU
-0xBA       0b1011101       MT9P031 Sensor
-0x6C       0b0110110       LM3509 LED driver
+0xA0       0b1010000       TPL0102 Digital potentiometer (V4)
+0x58       0b0101100       TPL0102 Digital potentiometer (sudo) (V4)
+0x50       0b0101000       BNO055 (V4)
+0xEE       0b1110111       MAX14574 EWL driver (V4)
+0x20       0b0010000       ATTINY MCU (V4)
+0xBA       0b1011101       MT9P031 Sensor (minicam)
+0x6C       0b0110110       LM3509 LED driver (minicam)
+---------------------------------------------
 0xFE       ---------       DAQ's USB controller (no I2C passthrough)
+---------------------------------------------
 NB: The 7-bit I2C addresses are given for reference only
 ====================================================================
+
+DAQ commands:
+    - 0x00: Enable BNO streaming
+    - 0x01: Hard Reset DAQ
+    - 0x02: Enable Input Trigger streaming to serializer (Modified Firmware only)
+    - 0x03: Disable Input Trigger streaming (Modified Firmware only)
 
 Author:
   Clément Bourguignon
@@ -33,6 +41,7 @@ Copyright (c) 2026 Clément Bourguignon
 
 using OpenCvSharp;
 using System;
+using System.Threading;
 
 namespace UCLAMiniscope.Helpers
 {
@@ -69,8 +78,8 @@ namespace UCLAMiniscope.Helpers
                     packet |= (ulong)values[i] << 8 * (2 + i); // add each byte
             }
 
-            capture.Set(VideoCaptureProperties.Contrast,   packet & 0x00000000FFFF);
-            capture.Set(VideoCaptureProperties.Gamma,     (packet & 0x0000FFFF0000) >> 16);
+            capture.Set(VideoCaptureProperties.Contrast, packet & 0x00000000FFFF);
+            capture.Set(VideoCaptureProperties.Gamma, (packet & 0x0000FFFF0000) >> 16);
             capture.Set(VideoCaptureProperties.Sharpness, (packet & 0xFFFF00000000) >> 32);
         }
 
@@ -201,8 +210,8 @@ namespace UCLAMiniscope.Helpers
         public static class MiniCam
         {
             // MT9P031 active sensor dimensions
-            private const int SENSOR_ACTIVE_WIDTH     = 2592;
-            private const int SENSOR_ACTIVE_HEIGHT    = 1944;
+            private const int SENSOR_ACTIVE_WIDTH = 2592;
+            private const int SENSOR_ACTIVE_HEIGHT = 1944;
             private const int SENSOR_ACTIVE_COL_START = 16;
             private const int SENSOR_ACTIVE_ROW_START = 54;
 
@@ -227,7 +236,7 @@ namespace UCLAMiniscope.Helpers
                 SendI2C(capture, 0xC0, 0x08, 0xBA, 0x6C); // Set aliases for MT9P031 (CMOS sensor) and LM3509 (LED Driver)
                 SendI2C(capture, 0xC0, 0x10, 0xBA, 0x6C); // Set aliases for MT9P031 and LM3509
 
-                // MT9P031 Camera Sensor configuration: 2048×1536 with 2×2 binning = 1024×768
+                // MT9P031 Camera Sensor configuration: default to 1024×768 with 2×2 binning
                 SendI2C(capture, 0xBA, 0x03, 0x05, 0xFF); // Row Size = 1535 (1536-1)
                 SendI2C(capture, 0xBA, 0x04, 0x07, 0xFF); // Column Size = 2047 (2048-1)
                 SendI2C(capture, 0xBA, 0x01, 0x01, 0x02); // Row start = 258 (theoretical center: 54 + (1944-1536)/2)
@@ -237,9 +246,9 @@ namespace UCLAMiniscope.Helpers
                 SendI2C(capture, 0xBA, 0x22, 0b00000000, 0b00010001); // Row Address Mode: Set row skip and bin (2×2)
                 SendI2C(capture, 0xBA, 0x23, 0b00000000, 0b00010001); // Column Address Mode: Set column skip and bin (2×2)
                 SendI2C(capture, 0xBA, 0x3E, 0x00, 0x80); // Set register 0x3E to 0x80 for low gain*  
-                // * For optimal sensor performance, when using gain settings <= 4.0 set reserved register R0x3E = 0x0080,
-                // and for gain settings >4.0 set register R0x003E = 0x00C0
-                
+                                                          // * For optimal sensor performance, when using gain settings <= 4.0 set reserved register R0x3E = 0x0080,
+                                                          // and for gain settings >4.0 set register R0x003E = 0x00C0
+
                 // LM3509 LED Driver general configuration
                 SendI2C(capture, 0x6C, 0x10, 0b11010111);
             }
@@ -302,10 +311,6 @@ namespace UCLAMiniscope.Helpers
                 int rowMargin = (SENSOR_ACTIVE_HEIGHT - sensorHeight) / 2;
                 int colStart = SENSOR_ACTIVE_COL_START + colMargin;
                 int rowStart = SENSOR_ACTIVE_ROW_START + rowMargin;
-
-                // Ensure even starts for Bayer pattern alignment (if using color sensor)
-                colStart = colStart / 2 * 2;
-                rowStart = rowStart / 2 * 2;
 
                 // Convert to register values (size - 1)
                 int rowSize = sensorHeight - 1;
@@ -398,6 +403,25 @@ namespace UCLAMiniscope.Helpers
                 {
                     SendI2C(capture, 0xBA, 0x3E, 0x00, 0x80);
                 }
+            }
+
+            /// <summary>
+            /// Sets the operating mode for the MT9P031 sensor.
+            /// Sets or resets Snapshot mode.
+            /// </summary>
+            /// <param name="capture">The VideoCapture instance for the MiniCam device.</param>
+            /// <param name="triggered">When True, sets Snapshot mode, when false, resets Snaphsot mode</param>
+            internal static void SetTriggerMode(VideoCapture capture, bool triggered)
+            {
+                // Change the trigger mode by setting Read Mode 1
+                // R0x01E default is 0x4006; set or clear bit 8 (Snapshot) while preserving other defaults
+                ushort regValue = (ushort)(0x4006 | (triggered ? (1 << 8) : 0));
+                byte v0 = (byte)((regValue >> 8) & 0xFF);
+                byte v1 = (byte)(regValue & 0xFF);
+
+                SendI2C(capture, 0xBA, 0x1E, v0, v1);
+                SendI2C(capture, 0xFE, (byte)(triggered ? 0x02 : 0x03)); // Enable or disable Snapshot mode streaming in DAQ
+                SendI2C(capture, 0xBA, 0x0B, 0x00, 0x01); // Restart Sensor
             }
 
             /// <summary>
