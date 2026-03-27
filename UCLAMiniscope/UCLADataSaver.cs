@@ -42,6 +42,9 @@ namespace UCLAMiniscope
         [Description("Folder name for this device")]
         public string DeviceFolderName { get; set; } = "Miniscope";
 
+        [Description("Subfolder structure under RootPath. Use {mouseID}, {date}, {time} in any order and combination. Default: {mouseID}/{date}/{time}")]
+        public string SubFolderPattern { get; set; } = "{mouseID}/{date}/{time}";
+
         [Description("When true, crops the video to the specified region of interest.")]
         public bool CropOutputVideo { get; set; } = false;
 
@@ -84,7 +87,7 @@ namespace UCLAMiniscope
 
                         lock (gate)
                         {
-                            recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, hasQuaternion: true, deviceFolderName: DeviceFolderName);
+                            recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, hasQuaternion: true, deviceFolderName: DeviceFolderName, subFolderPattern: SubFolderPattern);
                         }
                     }
                     
@@ -135,7 +138,7 @@ namespace UCLAMiniscope
 
                             lock (gate)
                             {
-                                recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, hasQuaternion: false, deviceFolderName: DeviceFolderName);
+                                recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, hasQuaternion: false, deviceFolderName: DeviceFolderName, subFolderPattern: SubFolderPattern);
                             }
                         }
 
@@ -167,7 +170,7 @@ namespace UCLAMiniscope
             readonly bool writeQuaternion;
             int frameCounter;
 
-            public Recorder(string baseName, string videoContainer, int segmentFrames, int width, int height, string videoCodec, string extraCodecArgs, bool writeQuaternion, bool hasQuaternion, string deviceFolderName)
+            public Recorder(string baseName, string videoContainer, int segmentFrames, int width, int height, string videoCodec, string extraCodecArgs, bool writeQuaternion, bool hasQuaternion, string deviceFolderName, string subFolderPattern)
             {
                 this.writeQuaternion = writeQuaternion && hasQuaternion;
 
@@ -177,8 +180,15 @@ namespace UCLAMiniscope
                 string date = RecordingService.Date;
                 string time = RecordingService.Time;
 
-                // Use the provided deviceFolderName directly
-                string folder = Path.Combine(rootPath, mouseID, date, time, deviceFolderName);
+                // Build the subfolder from the user-defined pattern
+                string subFolder = subFolderPattern
+                    .Replace("{mouseID}", mouseID)
+                    .Replace("{date}", date)
+                    .Replace("{time}", time);
+
+                string folder = string.IsNullOrWhiteSpace(subFolder)
+                    ? Path.Combine(rootPath, deviceFolderName)
+                    : Path.Combine(rootPath, subFolder, deviceFolderName);
                 Directory.CreateDirectory(folder);
 
                 // Sanitize base name
