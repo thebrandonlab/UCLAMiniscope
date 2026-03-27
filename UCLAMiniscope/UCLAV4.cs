@@ -241,7 +241,7 @@ namespace UCLAMiniscope
                                 {
                                     Hardware.V4.Initialize(capture);
 
-                                    Thread.Sleep(10); // to let everything settle
+                                    Thread.Sleep(500); // to let everything settle, increased for lower spec machines
 
                                     // Set frame size
                                     capture.Set(VideoCaptureProperties.FrameWidth, Width);
@@ -280,12 +280,17 @@ namespace UCLAMiniscope
                                                 }),
                                         ];
 
-                                    // Set propoerties to initial values
+                                    // Set propoerties to initial values, with delays for slower machines
                                     Hardware.V4.SetTriggerMode(capture, Triggered);
+                                    Thread.Sleep(50);
                                     Hardware.V4.SetFPS(capture, FPS);
+                                    Thread.Sleep(50);
                                     Hardware.V4.SetGain(capture, gain);
+                                    Thread.Sleep(50);
                                     Hardware.V4.SetFocus(capture, 127 * focus / 100);
+                                    Thread.Sleep(50);
                                     Hardware.V4.SetLEDBrightness(capture, 255 - LEDBrightness * 255 / 100); // This needs to be set last
+                                    Thread.Sleep(50);
 
                                     lastContrast = (ushort)capture.Get(VideoCaptureProperties.Contrast);
                                     CaptureService.SetFrameOffset(deviceId, -lastContrast);
