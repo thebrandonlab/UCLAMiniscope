@@ -4,6 +4,7 @@ MiniCam.cs
 Description:
   This class provides a source for capturing data from the UCLA Minicam. It captures frames and provides 
   configuration controls for resolution, gain, binning, frame rate, and the optional ring LED brightness.
+  Uses OpenCvSharp to reuse the V4 DAQ communication.
 
 Author:
   Clément Bourguignon
@@ -11,6 +12,7 @@ Author:
   2026
 
 Dependencies:
+  - OpenCvSharp
   - OpenCV.Net
 
 MIT License
@@ -72,6 +74,12 @@ namespace UCLAMiniscope
         private readonly Subject<GainMiniCam> gainSubject = new();
 
         /// <summary>
+        /// Gets or sets the camera index to capture from (for multiple MiniCam devices).
+        /// </summary>
+        [Description("Index of the minicam to capture from.")]
+        public int CameraIndex { get; set; } = 0;
+
+        /// <summary>
         /// Gets or sets the resolution preset supported by the DAQ firmware.
         /// </summary>
         [Description("Select the resolution supported by the DAQ firmware.")]
@@ -125,10 +133,11 @@ namespace UCLAMiniscope
         }
 
         /// <summary>
-        /// Gets or sets the camera index to capture from (for multiple MiniCam devices).
+        /// Gets or sets whether to trigger the exposure of a new frame by pulling GPIO0 low.
+        /// If false (default), the camera will run in free-run mode.
         /// </summary>
-        [Description("Index of the minicam to capture from.")]
-        public int CameraIndex { get; set; } = 0;
+        [Description("Makes the exposure of a new frame trigerrable by pulling Input Trigger low. ONLY WORKS WITH MODIFIED DAQ FIRWARE")]
+        public bool Triggered { get; set; } = false;
 
         /// <summary>
         /// Gets or sets whether to wait for reconnection if the camera disconnects.
@@ -137,6 +146,12 @@ namespace UCLAMiniscope
         [Description("True if you want to wait for reconnection, false if you want the workflow to stop.")]
         public bool WaitForReconnection { get; set; } = true;
 
+        /// <summary>
+        /// Gets or sets the optional display name for this device. If not specified, the device ID is used as the
+        /// default name.
+        /// </summary>
+        /// <remarks>This property allows users to assign a user-friendly name to the device, which can
+        /// improve clarity in user interfaces and logs.</remarks>
         [Description("Optional display name for this device. Defaults to the device ID if blank.")]
         public string DeviceName { get; set; } = "";
 
@@ -187,7 +202,6 @@ namespace UCLAMiniscope
                                     PixelClockHz = 96_000_000.0
                                 });
 
-
                                 var frame = new OpenCvSharp.Mat();
                                 var grayFrame = new OpenCvSharp.Mat();
                                 ulong frameNumber = 0;
@@ -196,6 +210,8 @@ namespace UCLAMiniscope
 
                                 try
                                 {
+                                    Hardware.MiniCam.SetTriggerMode(capture, Triggered);
+
                                     Hardware.MiniCam.Initialize(capture);
 
                                     Thread.Sleep(10); // to let everything settle
@@ -207,17 +223,6 @@ namespace UCLAMiniscope
                                     capture.Set(VideoCaptureProperties.FrameWidth, width);
                                     capture.Set(VideoCaptureProperties.FrameHeight, height);
 
-                                    //// Read back what the driver actually set (should match since we're using supported resolutions)
-                                    //int actualWidth = (int)capture.Get(VideoCaptureProperties.FrameWidth);
-                                    //int actualHeight = (int)capture.Get(VideoCaptureProperties.FrameHeight);
-
-                                    //if (actualWidth != width || actualHeight != height)
-                                    //{
-                                    //    Console.WriteLine($"[MiniCam] Warning: Requested {width}×{height}, driver set {actualWidth}×{actualHeight}");
-                                    //}
-
-                                    //// Configure the sensor to match what the driver will actually use
-                                    //Hardware.MiniCam.SetResolution(capture, actualWidth, actualHeight, (int)Binning, deviceId: deviceId);
                                     Hardware.MiniCam.SetResolution(capture, width, height, binning: (int)Binning, deviceId: deviceId);
                                     Hardware.MiniCam.SetFPS(capture, FPS, deviceId);
 
@@ -304,7 +309,6 @@ namespace UCLAMiniscope
                                     CaptureService.UnregisterCapture($"MiniCam_{CameraIndex}");
                                     DeviceMetadataRegistry.Unregister(deviceId);
                                     MiniCamConfigService.Unregister(deviceId);
-                                    //capture.Set(VideoCaptureProperties.Saturation, 0); // handled by StartRecording node
                                     frame.Dispose();
                                     grayFrame.Dispose();
                                     Thread.Sleep(10); // to let the LED switch off
