@@ -12,7 +12,7 @@ namespace UCLAMiniscope.Helpers
     /// <summary>
     /// Represents a frame from UCLA Miniscope V4 with IMU data.
     /// </summary>
-    public class FrameIMUV4(IplImage image, Vector4 quaternion, ulong frameNumber, long timestamp)
+    public class FrameIMUV4(IplImage image, Vector4 quaternion, ulong frameNumber, long timestamp, bool input)
     {
         /// <summary>
         /// Gets the grayscale image frame.
@@ -33,12 +33,17 @@ namespace UCLAMiniscope.Helpers
         /// Gets the timestamp in milliseconds.
         /// </summary>
         public long Timestamp { get; } = timestamp;
+        
+        /// <summary>
+        /// Gets the input state.
+        /// </summary>
+        public bool Input { get; } = input;
     }
 
     /// <summary>
     /// Represents a frame from UCLA Miniscope V4 without IMU data.
     /// </summary>
-    public class FrameV4(IplImage image, ulong frameNumber, ulong timestamp)
+    public class FrameV4(IplImage image, ulong frameNumber, ulong timestamp, bool input)
     {
         /// <summary>
         /// Gets the grayscale image frame.
@@ -54,12 +59,17 @@ namespace UCLAMiniscope.Helpers
         /// Gets the timestamp in ticks.
         /// </summary>
         public ulong Timestamp { get; } = timestamp;
+        
+        /// <summary>
+        /// Gets the input state.
+        /// </summary>
+        public bool Input { get; } = input;
     }
     
     /// <summary>
     /// Represents a frame from UCLA Miniscope V4 using OpenCvSharp Mat format.
     /// </summary>
-    public class FrameV4_Mat(OpenCvSharp.Mat image, Vector4 quaternion, ulong frameNumber, bool trigger, long timestamp)
+    public class FrameV4_Mat(OpenCvSharp.Mat image, Vector4 quaternion, ulong frameNumber, bool input, long timestamp)
     {
         /// <summary>
         /// Gets the image frame as OpenCvSharp Mat.
@@ -77,9 +87,9 @@ namespace UCLAMiniscope.Helpers
         public Vector4 Quaternion { get; } = quaternion;
         
         /// <summary>
-        /// Gets the trigger input state.
+        /// Gets the input state.
         /// </summary>
-        public bool Trigger { get; } = trigger;
+        public bool Input { get; } = input;
         
         /// <summary>
         /// Gets the timestamp in milliseconds.
@@ -106,7 +116,7 @@ namespace UCLAMiniscope.Helpers
     /// <summary>
     /// Represents a frame from UCLA MiniCam device.
     /// </summary>
-    public class FrameMiniCam(IplImage image, ulong frameNumber, long timestamp)
+    public class FrameMiniCam(IplImage image, ulong frameNumber, long timestamp, bool input)
     {
         /// <summary>
         /// Gets the grayscale image frame.
@@ -122,6 +132,11 @@ namespace UCLAMiniscope.Helpers
         /// Gets the timestamp in milliseconds.
         /// </summary>
         public long Timestamp { get; } = timestamp;
+
+        /// <summary>
+        /// Gets the input state.
+        /// </summary>
+        public bool Input { get; } = input;
     }
 
     public class MultiFrameRectangleEditor : IplImageRectangleEditor

@@ -70,7 +70,7 @@ namespace UCLAMiniscope
                         if (CropOutputVideo)
                         {
                             var croppedImage = frame.Image.GetSubRect(RegionOfInterest);
-                            frame = new FrameIMUV4(croppedImage, frame.Quaternion, frame.FrameNumber, frame.Timestamp);
+                            frame = new FrameIMUV4(croppedImage, frame.Quaternion, frame.FrameNumber, frame.Timestamp, frame.Input);
                         }
 
                         if (!RecordingService.IsRecording)
@@ -121,7 +121,7 @@ namespace UCLAMiniscope
                         if (CropOutputVideo)
                         {
                             var croppedImage = frame.Image.GetSubRect(RegionOfInterest);
-                            frame = new FrameMiniCam(croppedImage, frame.FrameNumber, frame.Timestamp);
+                            frame = new FrameMiniCam(croppedImage, frame.FrameNumber, frame.Timestamp, frame.Input);
                         }
 
                         if (!RecordingService.IsRecording)

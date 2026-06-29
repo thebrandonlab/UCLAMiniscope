@@ -169,6 +169,12 @@ namespace UCLAMiniscope
         [Description("Grab IMU data")]
         public bool GrabIMU { get; set; } = true;
 
+        /// <summary>
+        /// Gets or sets whether to capture the input state.
+        /// </summary>
+        [Description("Grab Input state")]
+        public bool GrabInputState { get; set; } = false;
+
         [Description("Optional display name for this device. Defaults to the device ID if blank.")]
         public string DeviceName { get; set; } = "";
 
@@ -236,6 +242,7 @@ namespace UCLAMiniscope
                                 ulong frameNumber = 0;
                                 ushort contrast;
                                 ushort lastContrast;
+                                bool inputState = false;
 
                                 try
                                 {
@@ -341,7 +348,13 @@ namespace UCLAMiniscope
                                                 Hardware.SendI2C(capture, 0x50, 0x41, 0b00001001, 0b00000101); // Remap BNO axes and signs
                                                 Hardware.SendI2C(capture, 0x50, 0x3D, 0b00001100); // Set BNO operation mode to NDOF
                                             }
-                                        }                                        
+                                        }
+
+                                        if (GrabInputState)
+                                        {
+                                            // Get input state from inverted Gamma register
+                                            inputState = capture.Get(VideoCaptureProperties.Gamma) != 0;
+                                        }
 
                                         // Create grayscale IplImage
                                         Cv2.CvtColor(frame, grayFrame, ColorConversionCodes.BGR2GRAY);
@@ -350,7 +363,7 @@ namespace UCLAMiniscope
                                         IplImage image = new(new OpenCV.Net.Size(grayFrame.Cols, grayFrame.Rows), IplDepth.U8, 1, grayFrame.Data);
 
                                         // Notify observer with the new frame
-                                        observer.OnNext(new FrameIMUV4(image, q, frameNumber, timestamp));
+                                        observer.OnNext(new FrameIMUV4(image, q, frameNumber, timestamp, inputState));
                                     }
                                 }
                                 catch (Exception e)

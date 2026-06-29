@@ -84,6 +84,12 @@ namespace UCLAMiniscope
             set { triggered = value; triggeredSubject.OnNext(value); }
         }
 
+        /// <summary>
+        /// Gets or sets whether to capture the input state.
+        /// </summary>
+        [Description("Grab Input state")]
+        public bool GrabInputState { get; set; } = false;
+
         [Description("Index of the miniscope to capture from.")]
         public int CameraIndex { get; set; } = 0;
 
@@ -119,7 +125,8 @@ namespace UCLAMiniscope
 
                                 var frame = new OpenCvSharp.Mat();
                                 var grayFrame = new OpenCvSharp.Mat();
-                                
+                                bool inputState = false;
+
                                 try
                                 {
                                     Hardware.V4.Initialize(capture);
@@ -182,9 +189,14 @@ namespace UCLAMiniscope
 
                                         frameNumber = (ulong)(contrast + frameOffset);
 
+                                        if (GrabInputState)
+                                        {
+                                            inputState = capture.Get(VideoCaptureProperties.Gamma) != 0;
+                                        }
+
                                         Cv2.CvtColor(frame, grayFrame, ColorConversionCodes.BGR2GRAY);
                                         var image = new IplImage(new OpenCV.Net.Size(grayFrame.Cols, grayFrame.Rows), IplDepth.U8, 1, grayFrame.Data);
-                                        observer.OnNext(new FrameV4(image, frameNumber, timestamp));
+                                        observer.OnNext(new FrameV4(image, frameNumber, timestamp, inputState));
                                     }
                                 }
                                 catch

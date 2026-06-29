@@ -140,6 +140,12 @@ namespace UCLAMiniscope
         public bool Triggered { get; set; } = false;
 
         /// <summary>
+        /// Gets or sets whether to capture the input state.
+        /// </summary>
+        [Description("Grab Input state")]
+        public bool GrabInputState { get; set; } = false;
+
+        /// <summary>
         /// Gets or sets whether to wait for reconnection if the camera disconnects.
         /// If false, the workflow will stop on disconnection.
         /// </summary>
@@ -207,6 +213,7 @@ namespace UCLAMiniscope
                                 ulong frameNumber = 0;
                                 ushort contrast;
                                 ushort lastContrast;
+                                bool inputState = false;
 
                                 try
                                 {
@@ -290,6 +297,12 @@ namespace UCLAMiniscope
 
                                         frameNumber = (uint)(contrast + CaptureService.GetFrameOffset(deviceId));
 
+                                        if (GrabInputState)
+                                        {
+                                            // Get input state from inverted Gamma register
+                                            inputState = capture.Get(VideoCaptureProperties.Gamma) != 0;
+                                        }
+
                                         // Create grayscale IplImage
                                         Cv2.CvtColor(frame, grayFrame, ColorConversionCodes.BGR2GRAY);
 
@@ -297,7 +310,7 @@ namespace UCLAMiniscope
                                         var image = new IplImage(new OpenCV.Net.Size(grayFrame.Cols, grayFrame.Rows), IplDepth.U8, 1, grayFrame.Data);
 
                                         // Notify observer with the new frame
-                                        observer.OnNext(new FrameMiniCam(image, frameNumber, timestamp));
+                                        observer.OnNext(new FrameMiniCam(image, frameNumber, timestamp, inputState));
                                     }
                                 }
                                 catch (Exception e)
