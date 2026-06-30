@@ -15,7 +15,7 @@ using UCLAMiniscope.Helpers;
 
 namespace UCLAMiniscope
 {
-    [Description("Saves Miniscope video, timestamps, quaternions, and metadata.")]
+    [Description("Saves Miniscope video and a single timestamps.csv (FrameNumber, TimeStamp_ms, and optionally quat/input columns).")]
     [WorkflowElementCategory(ElementCategory.Sink)]
     public class UCLADataSaver : Sink<FrameIMUV4>
     {
@@ -36,8 +36,11 @@ namespace UCLAMiniscope
         [Description("Video container format to use, e.g. mkv, mp4, ...")]
         public string VideoContainer { get; set; } = "mkv";
 
-        [Description("Write quaternion data to headOrientation.csv (only applies if frame contains quaternion data).")]
+        [Description("Append qw/qx/qy/qz columns to timestamps.csv (only applies if the frame type carries quaternion data).")]
         public bool WriteQuaternion { get; set; } = true;
+
+        [Description("Append an Input column (0/1) at the end of timestamps.csv.")]
+        public bool WriteInput { get; set; } = true;
 
         [Description("Folder name for this device")]
         public string DeviceFolderName { get; set; } = "Miniscope";
@@ -87,11 +90,11 @@ namespace UCLAMiniscope
 
                         lock (gate)
                         {
-                            recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, hasQuaternion: true, deviceFolderName: DeviceFolderName, subFolderPattern: SubFolderPattern);
+                            recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, WriteInput, hasQuaternion: true, deviceFolderName: DeviceFolderName, subFolderPattern: SubFolderPattern);
                         }
                     }
                     
-                        recorder.WriteCsv(frame.FrameNumber, frame.Timestamp, frame.Quaternion);
+                        recorder.WriteCsv(frame.FrameNumber, frame.Timestamp, frame.Input, frame.Quaternion);
                         recorder.WriteVideo(frame.Image);
                         observer.OnNext(frame);
                     }
@@ -138,11 +141,11 @@ namespace UCLAMiniscope
 
                             lock (gate)
                             {
-                                recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, hasQuaternion: false, deviceFolderName: DeviceFolderName, subFolderPattern: SubFolderPattern);
+                                recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, WriteInput, hasQuaternion: false, deviceFolderName: DeviceFolderName, subFolderPattern: SubFolderPattern);
                             }
                         }
 
-                        recorder.WriteCsv(frame.FrameNumber, frame.Timestamp, quaternion: null);
+                        recorder.WriteCsv(frame.FrameNumber, frame.Timestamp, frame.Input, quaternion: null);
                         recorder.WriteVideo(frame.Image);
                         observer.OnNext(frame);
                     }
@@ -160,19 +163,20 @@ namespace UCLAMiniscope
         // ------------------------- helper -------------------------------
         sealed class Recorder : IDisposable
         {
-            readonly StreamWriter tsWriter;
-            readonly StreamWriter quatWriter;
+            readonly StreamWriter csvWriter;
             readonly Process ffmpeg;
             readonly ImageWriter pipeWriter;
             readonly string pipeName;
             readonly Subject<IplImage> frameQueue;
             readonly IDisposable pipeSubscription;
             readonly bool writeQuaternion;
+            readonly bool writeInput;
             int frameCounter;
 
-            public Recorder(string baseName, string videoContainer, int segmentFrames, int width, int height, string videoCodec, string extraCodecArgs, bool writeQuaternion, bool hasQuaternion, string deviceFolderName, string subFolderPattern)
+            public Recorder(string baseName, string videoContainer, int segmentFrames, int width, int height, string videoCodec, string extraCodecArgs, bool writeQuaternion, bool writeInput, bool hasQuaternion, string deviceFolderName, string subFolderPattern)
             {
                 this.writeQuaternion = writeQuaternion && hasQuaternion;
+                this.writeInput = writeInput;
 
                 // folder creation
                 string mouseID = MouseInfoService.MouseID;
@@ -194,16 +198,12 @@ namespace UCLAMiniscope
                 // Sanitize base name
                 baseName = baseName.Replace("%d", "");
 
-                // CSVs
-                tsWriter = new StreamWriter(path: Path.Combine(folder, "timestamps.csv"), append: false, encoding: Encoding.UTF8);
-                tsWriter.WriteLine("FrameNumber,TimeStamp_ms");
-
-                // Only create quaternion writer if needed
-                if (this.writeQuaternion)
-                {
-                    quatWriter = new StreamWriter(path: Path.Combine(folder, "headOrientation.csv"), append: false, encoding: Encoding.UTF8);
-                    quatWriter.WriteLine("FrameNumber,TimeStamp_ms,qw,qx,qy,qz");
-                }
+                // Single CSV — optional columns appended in order: quat then input
+                csvWriter = new StreamWriter(path: Path.Combine(folder, "timestamps.csv"), append: false, encoding: Encoding.UTF8);
+                var headerBuilder = new StringBuilder("FrameNumber,TimeStamp_ms");
+                if (this.writeQuaternion) headerBuilder.Append(",qw,qx,qy,qz");
+                if (this.writeInput)      headerBuilder.Append(",Input");
+                csvWriter.WriteLine(headerBuilder.ToString());
 
                 // pipe server
                 pipeName = $@"\\.\pipe\{Guid.NewGuid():N}";
@@ -252,15 +252,17 @@ namespace UCLAMiniscope
             }
 
             // -------- write helpers -------------------------------------
-            public void WriteCsv(ulong frameNumber, long timestamp, Vector4? quaternion)
+            public void WriteCsv(ulong frameNumber, long timestamp, bool input, Vector4? quaternion)
             {
-                tsWriter.WriteLine($"{frameNumber},{timestamp}");
-
+                var row = new StringBuilder($"{frameNumber},{timestamp}");
                 if (writeQuaternion && quaternion.HasValue)
                 {
                     var q = quaternion.Value;
-                    quatWriter.WriteLine($"{frameNumber},{timestamp},{q.W},{q.X},{q.Y},{q.Z}");
+                    row.Append($",{q.W},{q.X},{q.Y},{q.Z}");
                 }
+                if (writeInput)
+                    row.Append($",{(input ? 1 : 0)}");
+                csvWriter.WriteLine(row.ToString());
             }
 
             public void WriteVideo(IplImage img)
@@ -289,8 +291,7 @@ namespace UCLAMiniscope
                 {
                     frameQueue.OnCompleted();
                     pipeSubscription.Dispose();
-                    tsWriter.Dispose();
-                    quatWriter?.Dispose(); // might be null if quaternion writing disabled
+                    csvWriter.Dispose();
                     ffmpeg.WaitForExit(2000);
                     if (!ffmpeg.HasExited) ffmpeg.Kill();
                     ffmpeg.Dispose();
