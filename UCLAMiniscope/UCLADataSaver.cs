@@ -15,39 +15,76 @@ using UCLAMiniscope.Helpers;
 
 namespace UCLAMiniscope
 {
+    /// <summary>
+    /// Saves Miniscope video and a single timestamps.csv containing FrameNumber, TimeStamp_ms,
+    /// and optionally quaternion and input columns.
+    /// </summary>
     [Description("Saves Miniscope video and a single timestamps.csv (FrameNumber, TimeStamp_ms, and optionally quat/input columns).")]
     [WorkflowElementCategory(ElementCategory.Sink)]
     public class UCLADataSaver : Sink<FrameIMUV4>
     {
         // -- user parameters --------------------------------------------------
+        /// <summary>
+        /// Gets or sets the number of frames per video segment. Pick a multiple of the frame rate for stable results.
+        /// Set to 0 to disable segmentation (default).
+        /// </summary>
         [Description("Frames per FFV1 segment. Pick a multiple of the frame-rate for " +
                      "stable results. Set to 0 to not use segmentation (default)")]
         public int SegmentFrames { get; set; } = 0;
 
+        /// <summary>
+        /// Gets or sets the base name for output video files. Leaving this blank produces numbered files only (e.g. 1.mkv, 2.mkv).
+        /// </summary>
         [Description("Base name for video files (leaving this blank will only number: 1.mkv, 2.mkv …).")]
         public string BaseVideoName { get; set; } = "";
 
+        /// <summary>
+        /// Gets or sets the video codec used for the output video files (e.g. <c>ffv1</c>, <c>h264</c>).
+        /// </summary>
         [Description("Video codec to use for the output video files.")]
         public string VideoCodec { get; set; } = "ffv1";
 
+        /// <summary>
+        /// Gets or sets optional extra arguments appended to the FFmpeg command. <c>-level 3</c> is recommended for ffv1.
+        /// </summary>
         [Description("Optional extra arguments for the FFmpeg command. \"-level 3\" recommended for ffv1")]
         public string ExtraCodecArgs { get; set; } = "";
 
+        /// <summary>
+        /// Gets or sets the video container format for output files (e.g. <c>mkv</c>, <c>mp4</c>).
+        /// </summary>
         [Description("Video container format to use, e.g. mkv, mp4, ...")]
         public string VideoContainer { get; set; } = "mkv";
 
+        /// <summary>
+        /// Gets or sets a value indicating whether qw/qx/qy/qz columns are appended to timestamps.csv.
+        /// Only applies when the frame type carries quaternion data.
+        /// </summary>
         [Description("Append qw/qx/qy/qz columns to timestamps.csv (only applies if the frame type carries quaternion data).")]
         public bool WriteQuaternion { get; set; } = true;
 
+        /// <summary>
+        /// Gets or sets a value indicating whether an Input column (0/1) is appended at the end of timestamps.csv.
+        /// </summary>
         [Description("Append an Input column (0/1) at the end of timestamps.csv.")]
         public bool WriteInput { get; set; } = true;
 
+        /// <summary>
+        /// Gets or sets the folder name used for this device under the output path.
+        /// </summary>
         [Description("Folder name for this device")]
         public string DeviceFolderName { get; set; } = "Miniscope";
 
+        /// <summary>
+        /// Gets or sets the subfolder structure under RootPath. Supports <c>{mouseID}</c>, <c>{date}</c>, and <c>{time}</c>
+        /// tokens in any order and combination. Default is <c>{mouseID}/{date}/{time}</c>.
+        /// </summary>
         [Description("Subfolder structure under RootPath. Use {mouseID}, {date}, {time} in any order and combination. Default: {mouseID}/{date}/{time}")]
         public string SubFolderPattern { get; set; } = "{mouseID}/{date}/{time}";
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the video is cropped to the specified region of interest before writing.
+        /// </summary>
         [Description("When true, crops the video to the specified region of interest.")]
         public bool CropOutputVideo { get; set; } = false;
 
@@ -59,6 +96,12 @@ namespace UCLAMiniscope
         public Rect RegionOfInterest { get; set; }
 
         // -- main pipeline -------------------------------------------------------
+        /// <summary>
+        /// Subscribes to the source sequence and writes each <see cref="FrameIMUV4"/> frame and its metadata
+        /// to disk while recording is active.
+        /// </summary>
+        /// <param name="source">The source sequence of <see cref="FrameIMUV4"/> frames to save.</param>
+        /// <returns>An observable sequence that passes through each <see cref="FrameIMUV4"/> from the source.</returns>
         public override IObservable<FrameIMUV4> Process(IObservable<FrameIMUV4> source)
         {
             return Observable.Create<FrameIMUV4>(observer =>
@@ -110,6 +153,12 @@ namespace UCLAMiniscope
         }
 
         // -- overload for FrameMiniCam ------------------------------------
+        /// <summary>
+        /// Subscribes to the source sequence and writes each <see cref="FrameMiniCam"/> frame and its metadata
+        /// to disk while recording is active.
+        /// </summary>
+        /// <param name="source">The source sequence of <see cref="FrameMiniCam"/> frames to save.</param>
+        /// <returns>An observable sequence that passes through each <see cref="FrameMiniCam"/> from the source.</returns>
         public IObservable<FrameMiniCam> Process(IObservable<FrameMiniCam> source)
         {
             return Observable.Create<FrameMiniCam>(observer =>
@@ -173,6 +222,22 @@ namespace UCLAMiniscope
             readonly bool writeInput;
             int frameCounter;
 
+            /// <summary>
+            /// Initializes a new <see cref="Recorder"/> instance, creates the output folder, opens the CSV writer,
+            /// and launches the FFmpeg process.
+            /// </summary>
+            /// <param name="baseName">Base name for video files.</param>
+            /// <param name="videoContainer">Container format (e.g. mkv, mp4).</param>
+            /// <param name="segmentFrames">Number of frames per segment; 0 disables segmentation.</param>
+            /// <param name="width">Frame width in pixels.</param>
+            /// <param name="height">Frame height in pixels.</param>
+            /// <param name="videoCodec">FFmpeg codec name (e.g. ffv1).</param>
+            /// <param name="extraCodecArgs">Additional FFmpeg arguments.</param>
+            /// <param name="writeQuaternion">Whether to write quaternion columns to the CSV.</param>
+            /// <param name="writeInput">Whether to write the Input column to the CSV.</param>
+            /// <param name="hasQuaternion">Whether the source frame type carries quaternion data.</param>
+            /// <param name="deviceFolderName">Device subfolder name inside the output path.</param>
+            /// <param name="subFolderPattern">Subfolder pattern supporting {mouseID}, {date}, and {time} tokens.</param>
             public Recorder(string baseName, string videoContainer, int segmentFrames, int width, int height, string videoCodec, string extraCodecArgs, bool writeQuaternion, bool writeInput, bool hasQuaternion, string deviceFolderName, string subFolderPattern)
             {
                 this.writeQuaternion = writeQuaternion && hasQuaternion;
@@ -252,6 +317,13 @@ namespace UCLAMiniscope
             }
 
             // -------- write helpers -------------------------------------
+            /// <summary>
+            /// Writes one row to the timestamps CSV for the given frame.
+            /// </summary>
+            /// <param name="frameNumber">Zero-based index of the frame.</param>
+            /// <param name="timestamp">Elapsed time in milliseconds at the time the frame was captured.</param>
+            /// <param name="input">Digital input state recorded alongside the frame.</param>
+            /// <param name="quaternion">Optional orientation quaternion (written only when <see cref="writeQuaternion"/> is enabled).</param>
             public void WriteCsv(ulong frameNumber, long timestamp, bool input, Vector4? quaternion)
             {
                 var row = new StringBuilder($"{frameNumber},{timestamp}");
@@ -265,6 +337,11 @@ namespace UCLAMiniscope
                 csvWriter.WriteLine(row.ToString());
             }
 
+            /// <summary>
+            /// Sends an image frame to FFmpeg via the named pipe. Deep-copies the first 50 frames
+            /// to ensure the pipe is ready before passing original pointers.
+            /// </summary>
+            /// <param name="img">The image frame to write.</param>
             public void WriteVideo(IplImage img)
             {
                 if (frameCounter < 50)
@@ -285,6 +362,9 @@ namespace UCLAMiniscope
             }
 
             // -------- cleanup -------------------------------------------
+            /// <summary>
+            /// Flushes and closes the CSV writer, shuts down the FFmpeg process, and releases all managed resources.
+            /// </summary>
             public void Dispose()
             {
                 try

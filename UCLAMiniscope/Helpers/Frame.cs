@@ -1,6 +1,4 @@
-﻿// Adapted from the work of Jonathan Newman. I merely added OpenCvSharp.Mat support
-
-using Bonsai.Vision.Design;
+﻿using Bonsai.Vision.Design;
 using OpenCV.Net;
 using System;
 using System.Numerics;

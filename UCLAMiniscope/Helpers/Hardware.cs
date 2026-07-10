@@ -136,6 +136,8 @@ namespace UCLAMiniscope.Helpers
                 SendI2C(capture, 0x50, 0x41, 0b00001001, 0b00000101); // Remap BNO axes and signs
                 SendI2C(capture, 0x50, 0x3D, 0b00001100); // Set BNO operation mode to NDOF
                 SendI2C(capture, 0xFE, 0x00, 0x00); // Enable BNO streaming in DAQ
+
+                // Configure EWL Driver
                 SendI2C(capture, 0xEE, 0x03, 0x03); // Enable EWL Driver
             }
 

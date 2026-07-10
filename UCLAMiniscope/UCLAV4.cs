@@ -77,9 +77,6 @@ namespace UCLAMiniscope
         const int Width = 608;
         const int Height = 608;
 
-        // 1 quaterion = 2^14 bits
-        const float QuatConvFactor = 1.0f / (1 << 14);
-
         // Miniscope properties
         private int ledBrightness = 0;
         private int fps = 30;
@@ -337,13 +334,21 @@ namespace UCLAMiniscope
 
                                         if (GrabIMU)
                                         {
-                                            q.W = QuatConvFactor * (float)capture.Get(VideoCaptureProperties.Saturation);
-                                            q.X = QuatConvFactor * (float)capture.Get(VideoCaptureProperties.Hue);
-                                            q.Y = QuatConvFactor * (float)capture.Get(VideoCaptureProperties.Gain);
-                                            q.Z = QuatConvFactor * (float)capture.Get(VideoCaptureProperties.Brightness);
+                                            var candidate = QuaternionHelper.Read(capture);
+                                            bool candidateIsValid = QuaternionHelper.IsValid(candidate, out float candidateNormSquared);
 
-                                            // sometimes the BNO055 loses power and has to be reset. 0 is very unlikely to be a valid value
-                                            if (Math.Abs(q.W) < 1e-6f)
+                                            // A corrupt or torn read must not replace the last good orientation.
+                                            if (candidateIsValid)
+                                            {
+                                                q = candidate;
+                                            }
+
+                                            // A near-zero norm cannot represent an orientation and indicates that
+                                            // the BNO055 has stopped after a brief power or coax interruption.
+                                            // This is the only check we do, if the BNO was starting to send constant
+                                            // garbage we would need to go back to CONFIG mode and reinitialize it, 
+                                            // but that has not happened in practice yet, so let's not do it for now.
+                                            if (candidateNormSquared < QuaternionHelper.FailureNormSquaredThreshold)
                                             {
                                                 Hardware.SendI2C(capture, 0x50, 0x41, 0b00001001, 0b00000101); // Remap BNO axes and signs
                                                 Hardware.SendI2C(capture, 0x50, 0x3D, 0b00001100); // Set BNO operation mode to NDOF

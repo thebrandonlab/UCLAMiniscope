@@ -17,9 +17,6 @@ namespace UCLAMiniscope
     [Description("Emits quaternion IMU data from a UCLA V4 capture stream.")]
     public class UCLAV4_IMU : Source<Vector4>
     {
-        // 1 quaterion = 2^14 bits
-        const float QuatConvFactor = 1.0f / (1 << 14);
-
         /// <summary>
         /// Gets or sets the device index of the V4 miniscope to read IMU data from.
         /// Must match the CameraIndex of the corresponding UCLAV4 source.
@@ -90,13 +87,18 @@ namespace UCLAMiniscope
                         if (capture != null)
                         {
                             // Read IMU data directly from capture registers
-                            q.W = QuatConvFactor * (float)capture.Get(VideoCaptureProperties.Saturation);
-                            q.X = QuatConvFactor * (float)capture.Get(VideoCaptureProperties.Hue);
-                            q.Y = QuatConvFactor * (float)capture.Get(VideoCaptureProperties.Gain);
-                            q.Z = QuatConvFactor * (float)capture.Get(VideoCaptureProperties.Brightness);
+                            var candidate = QuaternionHelper.Read(capture);
+                            bool candidateIsValid = QuaternionHelper.IsValid(candidate, out float candidateNormSquared);
 
-                            // sometimes the BNO055 loses power and has to be reset. 0 is very unlikely to be a valid value
-                            if (Math.Abs(q.W) < 1e-6f)
+                            // A corrupt or torn read must not replace the last good orientation.
+                            if (candidateIsValid)
+                            {
+                                q = candidate;
+                            }
+
+                            // A near-zero norm cannot represent an orientation and indicates that
+                            // the BNO055 has stopped after a brief power or coax interruption.
+                            if (candidateNormSquared < QuaternionHelper.FailureNormSquaredThreshold)
                             {
                                 Hardware.SendI2C(capture, 0x50, 0x41, 0b00001001, 0b00000101); // Remap BNO axes and signs
                                 Hardware.SendI2C(capture, 0x50, 0x3D, 0b00001100); // Set BNO operation mode to NDOF

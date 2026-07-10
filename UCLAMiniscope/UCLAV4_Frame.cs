@@ -13,7 +13,11 @@ using UCLAMiniscope.Helpers;
 
 namespace UCLAMiniscope
 {
-    [Description("Produces FrameV4 objects from the UCLA Miniscope V4 using a shared capture instance.")]
+    /// <summary>
+    /// Produces <see cref="FrameV4"/> objects from the UCLA Miniscope V4 using a shared capture instance.
+    /// Use this source when IMU data is not needed, or when IMU data is captured separately at a higher rate.
+    /// </summary>
+    [Description("Produces FrameV4 objects from the UCLA Miniscope V4 using a shared capture instance, useful if IMU data is captured separately.")]
     public class UCLAV4_Frame : Source<FrameV4>
     {
         // Frame size
@@ -42,6 +46,9 @@ namespace UCLAMiniscope
         private readonly Subject<bool> triggeredSubject = new Subject<bool>();
         private readonly Subject<GainV4> gainSubject = new Subject<GainV4>();
 
+        /// <summary>
+        /// Gets or sets the intensity of the miniscope's excitation LED (0–100%).
+        /// </summary>
         [Description("Adjusts the intensity of the miniscope's LED (0-100%).")]
         [Range(0, 100)]
         [Editor(DesignTypes.SliderEditor, DesignTypes.UITypeEditor)]
@@ -51,6 +58,9 @@ namespace UCLAMiniscope
             set { ledBrightness = value; ledBrightnessSubject.OnNext(255 - value * 255 / 100); }
         }
 
+        /// <summary>
+        /// Gets or sets the capture frame rate in frames per second (10–30).
+        /// </summary>
         [Description("Sets the framerate.")]
         [Range(10, 30)]
         public int FPS
@@ -59,6 +69,9 @@ namespace UCLAMiniscope
             set { fps = value; fpsSubject.OnNext(value); }
         }
 
+        /// <summary>
+        /// Gets or sets the electrowetting lens (EWL) focus value (-127 to 127).
+        /// </summary>
         [Description("Sets the EWL focus.")]
         [Range(-127, 127)]
         [Editor(DesignTypes.SliderEditor, DesignTypes.UITypeEditor)]
@@ -68,6 +81,9 @@ namespace UCLAMiniscope
             set { focus = value; focusSubject.OnNext(value); }
         }
 
+        /// <summary>
+        /// Gets or sets the gain level of the image sensor.
+        /// </summary>
         [Description("Sets the gain of the image sensor.")]
         public GainV4 Gain
         {
@@ -75,6 +91,11 @@ namespace UCLAMiniscope
             set { gain = value; gainSubject.OnNext(value); }
         }
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the LED is gated by the trigger input.
+        /// When <see langword="true"/>, the LED turns off while the trigger pin is low.
+        /// Note that the pin is low by default, so the LED will not turn on unless the pin is driven high.
+        /// </summary>
         [Description("Turns off the LED when the trigger input is low. " +
             "Note that this pin is low by default. Therefore, if it is not driven and " +
             "this option is set to true, the LED will not turn on.")]
@@ -90,14 +111,26 @@ namespace UCLAMiniscope
         [Description("Grab Input state")]
         public bool GrabInputState { get; set; } = false;
 
+        /// <summary>
+        /// Gets or sets the zero-based index of the miniscope camera to capture from.
+        /// </summary>
         [Description("Index of the miniscope to capture from.")]
         public int CameraIndex { get; set; } = 0;
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the source should keep retrying after a disconnection.
+        /// When <see langword="false"/>, the workflow stops immediately on connection failure.
+        /// </summary>
         [Description("True if you want to wait for reconnection, false if you want the workflow to stop.")]
         public bool WaitForReconnection { get; set; } = true;
 
         readonly IObservable<FrameIMUV4> source;
 
+        /// <summary>
+        /// Starts the miniscope capture loop and produces a sequence of <see cref="FrameV4"/> frames.
+        /// Automatically reconnects when <see cref="WaitForReconnection"/> is <see langword="true"/>.
+        /// </summary>
+        /// <returns>An observable sequence of <see cref="FrameV4"/> frames captured from the miniscope.</returns>
         public override IObservable<FrameV4> Generate()
         {
             return Observable.Create<FrameV4>((observer, cancellationToken) =>

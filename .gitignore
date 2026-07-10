@@ -37,7 +37,8 @@ Thumbs.db
 *~
 *.tmp
 
-# Test results
+# Testing
+UCLAMiniscope/Tests/
 TestResults/
 
 # VS cache
@@ -52,6 +53,7 @@ TestResults/
 *.dylib
 
 # Bonsai / other package-generated folders
+.bonsai/
 packages/
 
 # GitHub workflows build artifacts

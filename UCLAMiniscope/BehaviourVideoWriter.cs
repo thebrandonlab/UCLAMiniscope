@@ -10,24 +10,39 @@ using UCLAMiniscope.Helpers;
 
 namespace UCLAMiniscope
 {
+    /// <summary>
+    /// Writes behavior video and timestamps to disk while recording is active.
+    /// </summary>
     [Description("Writes behavior video and timestamps to disk while recording is active.")]
     [WorkflowElementCategory(ElementCategory.Sink)]
     public class BehaviorVideoWriter : Sink<IplImage>
     {
         static readonly object SyncRoot = new();
 
+        /// <summary>
+        /// Gets or sets the four-character code of the codec used to compress video frames.
+        /// </summary>
         [Description("Specifies the four-character code of the codec used to compress video frames.")]
         public string FourCC { get; set; } = "FMP4";
 
+        /// <summary>
+        /// Gets or sets the playback frame rate of the image sequence.
+        /// </summary>
         [Description("Specifies the playback frame rate of the image sequence.")]
         public double FrameRate { get; set; } = 30;
 
         //[Description("The optional size of video frames.")]
         //public Size FrameSize { get; set; }
 
+        /// <summary>
+        /// Gets or sets the optional interpolation method used when resizing video frames.
+        /// </summary>
         [Description("Specifies the optional interpolation method if resizing video frames.")]
         public SubPixelInterpolation ResizeInterpolation { get; set; }
 
+        /// <summary>
+        /// Gets or sets the number of frames per video segment. Set to 0 for no segmentation (default).
+        /// </summary>
         [Description("The number of frames per video segment. Set to 0 for no segmentation (default)")]
         public int SegmentFrames { get; set; } = 0;
 
@@ -84,6 +99,11 @@ namespace UCLAMiniscope
             }
         }
 
+        /// <summary>
+        /// Subscribes to the source sequence and writes each image frame and its timestamp to disk while recording is active.
+        /// </summary>
+        /// <param name="source">The source sequence of <see cref="IplImage"/> frames to write.</param>
+        /// <returns>An observable sequence that passes through each <see cref="IplImage"/> from the source.</returns>
         public override IObservable<IplImage> Process(IObservable<IplImage> source)
         {
             if (SegmentFrames == 0) {
@@ -165,10 +185,19 @@ namespace UCLAMiniscope
         }
     }
 
+    /// <summary>
+    /// Wraps a <see cref="VideoWriter"/> together with its target frame size and manages its lifetime.
+    /// </summary>
     public sealed class VideoWriterDisposable : ICancelable, IDisposable
     {
         IDisposable resource;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="VideoWriterDisposable"/> class.
+        /// </summary>
+        /// <param name="writer">The underlying <see cref="VideoWriter"/> instance.</param>
+        /// <param name="frameSize">The target frame size used when writing frames.</param>
+        /// <param name="disposable">The disposable that releases the writer's resources.</param>
         internal VideoWriterDisposable(VideoWriter writer, Size frameSize, IDisposable disposable)
         {
             Writer = writer ?? throw new ArgumentNullException(nameof(writer));
@@ -176,15 +205,27 @@ namespace UCLAMiniscope
             resource = disposable;
         }
 
+        /// <summary>
+        /// Gets the underlying <see cref="VideoWriter"/> used to write video frames.
+        /// </summary>
         public VideoWriter Writer { get; }
 
+        /// <summary>
+        /// Gets the target frame size used when writing video frames.
+        /// </summary>
         public Size FrameSize { get; }
 
+        /// <summary>
+        /// Gets a value indicating whether the writer has been disposed.
+        /// </summary>
         public bool IsDisposed
         {
             get { return resource == null; }
         }
 
+        /// <summary>
+        /// Releases all resources used by the <see cref="VideoWriterDisposable"/>.
+        /// </summary>
         public void Dispose()
         {
             var disposable = Interlocked.Exchange(ref resource, null);

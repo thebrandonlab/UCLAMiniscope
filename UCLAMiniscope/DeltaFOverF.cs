@@ -27,6 +27,10 @@ using Bonsai;
 
 namespace UCLAMiniscope
 {
+    /// <summary>
+    /// Divides each frame by a rolling baseline accumulated over a configurable number of frames,
+    /// updating at a specified frequency to produce a ΔF/F normalized output.
+    /// </summary>
     [Description("Divides each frame by a baseline accumulated over a configurable number of frames, updating at a specified frequency.")]
     [WorkflowElementCategory(ElementCategory.Transform)]
     public class DeltaFOverF : Transform<IplImage, IplImage>
@@ -39,26 +43,49 @@ namespace UCLAMiniscope
         private DateTime t = DateTime.UtcNow;
         private TimeSpan pauseDuration = TimeSpan.FromSeconds(1);
 
+        /// <summary>
+        /// Gets or sets the number of frames accumulated into the rolling baseline (1–1024).
+        /// </summary>
         [Description("Number of frames to hold as reference.")]
         [Range(1, 1024)]
         public int BufferCapacity { get; set; } = 64;
 
+        /// <summary>
+        /// Gets or sets how many frames must pass between baseline updates.
+        /// </summary>
         [Description("Number of frames before updating the baseline.")]
         public int UpdateFrequency { get; set; } = 10;
 
+        /// <summary>
+        /// Gets or sets the scalar gain applied to the normalized ΔF/F image before output (0.0–15.0).
+        /// </summary>
         [Description("Gain applied to the normalized image.")]
         [Range(0.0, 15.0)]
         public double Gain { get; set; } = 10.0;
 
+        /// <summary>
+        /// Gets or sets a value indicating whether the ΔF/F normalization is active.
+        /// When <see langword="false"/>, frames are passed through unchanged.
+        /// </summary>
         [Description("Enable or disable the delta F over F normalization.")]
         public bool Enabled { get; set; } = true;
 
 
-
+        /// <summary>
+        /// Initializes a new instance of the <see cref="DeltaFOverF"/> class with default settings.
+        /// </summary>
         public DeltaFOverF()
         {
         }
 
+        /// <summary>
+        /// Applies ΔF/F normalization to each frame in the source sequence using a rolling baseline.
+        /// </summary>
+        /// <param name="source">The source sequence of <see cref="IplImage"/> frames to normalize.</param>
+        /// <returns>
+        /// An observable sequence of normalized <see cref="IplImage"/> frames, or the original frames
+        /// when <see cref="Enabled"/> is <see langword="false"/>.
+        /// </returns>
         public override IObservable<IplImage> Process(IObservable<IplImage> source)
         {
             return source.Select(input =>
