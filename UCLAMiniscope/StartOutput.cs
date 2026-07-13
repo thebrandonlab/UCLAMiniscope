@@ -14,6 +14,7 @@ namespace UCLAMiniscope
     {
         /// <summary>
         /// Starts the frame output switch for all registered capture devices.
+        /// Useful for setting up the minicam and starting the output TTL for recording in another software without control.
         /// </summary>
         /// <returns>The source sequence, unchanged.</returns>
 

@@ -12,7 +12,7 @@ Author:
 
 Notes:
   - OpenCV.NET takes a very long time to retrieve the IMU data. This node uses both OpenCvSharp for faster access to the camera
-    registers and OpenCV.NET for creating legacy IplImages to use in Bonsai
+    registers and OpenCV.NET for creating legacy IplImages to use in Bonsai.
   - All relevant data besides the frame come from the camera registers:
     - Saturation   -> Quaternion W and start/stop acquisition
     - Hue          -> Quaternion X
@@ -25,8 +25,8 @@ Notes:
     but that's something that can be considered.
 
 Dependencies:
-  - OpenCV.Net
-  - OpenCvSharp
+  - OpenCvSharp to comunicate with the DAQ
+  - OpenCV.Net to output legacy IplImages
 
 MIT License
 Copyright (c) 2026 Clément Bourguignon

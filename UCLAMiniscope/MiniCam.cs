@@ -12,8 +12,8 @@ Author:
   2026
 
 Dependencies:
-  - OpenCvSharp
-  - OpenCV.Net
+  - OpenCvSharp to reuse the miniscope/DAQ communication code
+  - OpenCV.Net to output legacy IplImages
 
 MIT License
 Copyright (c) 2026 Clément Bourguignon
