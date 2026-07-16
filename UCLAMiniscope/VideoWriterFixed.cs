@@ -1,11 +1,6 @@
-﻿/*
-Description:
-Based on the official Bonsai.FFmepg VideoWriter operator, but with the following fixes:
-  - Changed the very long 1 second delay before starting the ffmpeg process to a much shorter 10 ms delay,
-    which should be sufficient for the ImageWriter to start writing frames to the pipe on most hardware,
-    removing the 1 second freeze at the start of recording.
-  - Added 16 bit grayscale support.
-*/
+﻿// SPDX-FileCopyrightText: Bonsai Foundation CIC and Contributors
+// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
 
 using System;
 using System.ComponentModel;
@@ -21,6 +16,10 @@ namespace Bonsai.FFmpeg
     /// <summary>
     /// Represents an operator that writes a sequence of images to a video file using an FFmpeg process.
     /// </summary>
+    /// <remarks>
+    /// Adapted from Bonsai.FFmpeg. This version shortens process startup to 10 ms and adds
+    /// 16-bit grayscale support. See THIRD_PARTY_NOTICES.md.
+    /// </remarks>
     [DefaultProperty("FileName")]
     [Description("Writes a sequence of images to a video file using an FFmpeg process.")]
     public class VideoWriter : Sink<IplImage>

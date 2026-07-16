@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
+
 using OpenCvSharp;
 using System;
 using System.Numerics;
@@ -21,7 +24,7 @@ namespace UCLAMiniscope.Helpers
         /// <summary>
         /// Reads a quaternion in System.Numerics order (X, Y, Z, W).
         /// </summary>
-        internal static Vector4 Read(VideoCapture capture)
+        internal static Quaternion Read(VideoCapture capture)
         {
             // Read in the DAQ's legacy W, X, Y, Z order so all components come
             // from as compact a sequence of UVC property requests as possible.
@@ -29,13 +32,13 @@ namespace UCLAMiniscope.Helpers
             float x = ReadComponent(capture, VideoCaptureProperties.Hue);
             float y = ReadComponent(capture, VideoCaptureProperties.Gain);
             float z = ReadComponent(capture, VideoCaptureProperties.Brightness);
-            return new Vector4(x, y, z, w);
+            return new Quaternion(x, y, z, w);
         }
 
         /// <summary>
         /// Tests whether a quaternion has a finite norm within the BNO055 tolerance.
         /// </summary>
-        internal static bool IsValid(Vector4 value, out float normSquared)
+        internal static bool IsValid(Quaternion value, out float normSquared)
         {
             normSquared =
                 value.W * value.W +

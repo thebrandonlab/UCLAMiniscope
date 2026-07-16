@@ -1,24 +1,10 @@
-﻿/*
-Description:
-  Shared services for UCLA Miniscope capture, recording, timing, and metadata management.
-
-Author:
-  Clément Bourguignon
-  Brandon Lab @ McGill University
-  2026
-
-Dependencies:
-  - OpenCvSharp
-
-MIT License
-Copyright (c) 2026 Clément Bourguignon
-*/
+﻿// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
 
 using OpenCvSharp;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Text.Json.Serialization;
 
 namespace UCLAMiniscope.Helpers
 {
@@ -33,6 +19,7 @@ namespace UCLAMiniscope.Helpers
     {
         private static readonly object lockObject = new object();
         private static readonly Dictionary<string, CaptureInfo> captures = new Dictionary<string, CaptureInfo>();
+        private static readonly Dictionary<string, bool> desiredFrameOutputStates = new Dictionary<string, bool>();
 
         /// <summary>
         /// Holds metadata about a registered capture device.
@@ -45,9 +32,14 @@ namespace UCLAMiniscope.Helpers
             public VideoCapture Capture { get; set; }
 
             /// <summary>
+            /// Gets or sets the transport-neutral controls for this device session.
+            /// </summary>
+            public IDeviceSessionControls DeviceControls { get; set; }
+
+            /// <summary>
             /// Gets or sets the running frame offset used to correct hardware frame numbers.
             /// </summary>
-            public int FrameOffset { get; set; }
+            public long FrameOffset { get; set; }
 
             /// <summary>
             /// Gets or sets the device type identifier (e.g. <c>V4</c> or <c>MiniCam</c>).
@@ -56,22 +48,42 @@ namespace UCLAMiniscope.Helpers
         }
 
         /// <summary>
-        /// Registers a capture device with the service.
+        /// Registers a capture device that does not expose an OpenCvSharp capture instance.
         /// </summary>
-        /// <param name="deviceId">Unique identifier for the device (e.g. <c>V4_0</c>, <c>MiniCam_1</c>).</param>
-        /// <param name="capture">The <see cref="VideoCapture"/> instance for this device.</param>
-        /// <param name="deviceType">Type of device (<c>V4</c> or <c>MiniCam</c>).</param>
-        public static void RegisterCapture(string deviceId, VideoCapture capture, string deviceType)
+        /// <param name="deviceId">Unique identifier for the device.</param>
+        /// <param name="deviceControls">Transport-neutral controls for the active device session.</param>
+        /// <param name="deviceType">Type of capture device.</param>
+        public static void RegisterCapture(string deviceId, IDeviceSessionControls deviceControls, string deviceType)
         {
+            RegisterCapture(deviceId, null, deviceControls, deviceType);
+        }
+
+        internal static void RegisterCapture(
+            string deviceId,
+            VideoCapture capture,
+            IDeviceSessionControls deviceControls,
+            string deviceType)
+        {
+            if (string.IsNullOrWhiteSpace(deviceId)) throw new ArgumentException("A device ID is required.", nameof(deviceId));
+            if (deviceControls == null) throw new ArgumentNullException(nameof(deviceControls));
+
+            bool restoreFrameOutput;
+            bool frameOutputEnabled;
             lock (lockObject)
             {
                 captures[deviceId] = new CaptureInfo
                 {
                     Capture = capture,
+                    DeviceControls = deviceControls,
                     FrameOffset = 0,
                     DeviceType = deviceType
                 };
+
+                restoreFrameOutput = desiredFrameOutputStates.TryGetValue(deviceId, out frameOutputEnabled);
             }
+
+            if (restoreFrameOutput)
+                deviceControls.SetFrameOutputEnabled(frameOutputEnabled);
         }
 
         /// <summary>
@@ -116,7 +128,7 @@ namespace UCLAMiniscope.Helpers
         /// </summary>
         /// <param name="deviceId">The unique identifier of the device.</param>
         /// <param name="offset">The new frame offset value.</param>
-        public static void SetFrameOffset(string deviceId, int offset)
+        public static void SetFrameOffset(string deviceId, long offset)
         {
             lock (lockObject)
             {
@@ -132,12 +144,47 @@ namespace UCLAMiniscope.Helpers
         /// </summary>
         /// <param name="deviceId">The unique identifier of the device.</param>
         /// <returns>The current frame offset, or 0 if the device is not registered.</returns>
-        public static int GetFrameOffset(string deviceId)
+        public static long GetFrameOffset(string deviceId)
         {
             lock (lockObject)
             {
                 return captures.TryGetValue(deviceId, out var info) ? info.FrameOffset : 0;
             }
+        }
+
+        /// <summary>
+        /// Stores and applies the desired frame-output state for a device. The state is restored
+        /// automatically if the DAQ reconnects with a new capture session.
+        /// </summary>
+        /// <param name="deviceId">The unique identifier of the device.</param>
+        /// <param name="enabled">Whether frame-output TTLs should be enabled.</param>
+        public static void SetFrameOutputEnabled(string deviceId, bool enabled)
+        {
+            IDeviceSessionControls deviceControls = null;
+            lock (lockObject)
+            {
+                desiredFrameOutputStates[deviceId] = enabled;
+                if (captures.TryGetValue(deviceId, out var info))
+                    deviceControls = info.DeviceControls;
+            }
+
+            deviceControls?.SetFrameOutputEnabled(enabled);
+        }
+
+        /// <summary>
+        /// Resets a device's software frame origin to its current hardware frame number.
+        /// </summary>
+        /// <param name="deviceId">The unique identifier of the device.</param>
+        public static void ResetFrameOffset(string deviceId)
+        {
+            var captureInfo = GetCapture(deviceId);
+            if (captureInfo == null) return;
+
+            var currentFrameNumber = captureInfo.DeviceControls.ReadFrameNumber();
+            if (currentFrameNumber > long.MaxValue)
+                throw new OverflowException("The hardware frame number cannot be represented by the frame-offset service.");
+
+            SetFrameOffset(deviceId, -(long)currentFrameNumber);
         }
     }
 
@@ -344,14 +391,17 @@ namespace UCLAMiniscope.Helpers
         public string deviceName { get; set; } = "Miniscope";
         /// <summary>Gets or sets the device type string (e.g. <c>Miniscope_V4_BNO</c>).</summary>
         public string deviceType { get; set; } = "Miniscope_V4_BNO";
+        /// <summary>Gets or sets the DAQ firmware protocol generation (<c>legacy</c> or <c>current</c>).</summary>
+        public string firmwareGeneration { get; set; } = "legacy";
+        /// <summary>Gets or sets the DAQ firmware version, or <c>unreported</c> when unavailable.</summary>
+        public string firmwareVersion { get; set; } = "unreported";
         /// <summary>Gets or sets the electrowetting lens (EWL) focus value.</summary>
         public int ewl { get; set; }
         /// <summary>Gets or sets the capture frame rate in frames per second.</summary>
         public int frameRate { get; set; }
-        /// <summary>Gets or sets the image sensor gain setting.</summary>
-        [JsonConverter(typeof(JsonStringEnumConverter))]
-        public GainV4 gain { get; set; }
-        /// <summary>Gets or sets the LED brightness value (0–255).</summary>
+        /// <summary>Gets or sets the device-specific image sensor gain setting.</summary>
+        public string gain { get; set; } = GainV4.Low.ToString();
+        /// <summary>Gets or sets the LED brightness as a percentage of maximum.</summary>
         public int led0 { get; set; }
 #pragma warning restore IDE1006 // Naming Styles    
     }
@@ -428,7 +478,7 @@ namespace UCLAMiniscope.Helpers
         private static readonly Dictionary<string, SensorConfig> configs = new Dictionary<string, SensorConfig>();
 
         /// <summary>
-        /// Registers a device configuration. Call right after <see cref="CaptureService.RegisterCapture"/>.
+        /// Registers a device configuration immediately after its capture has been registered.
         /// </summary>
         /// <param name="deviceId">The unique identifier of the device.</param>
         /// <param name="config">The <see cref="SensorConfig"/> to associate with the device.</param>

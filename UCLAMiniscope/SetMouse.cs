@@ -1,4 +1,7 @@
-﻿using System;
+﻿// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
+
+using System;
 using System.ComponentModel;
 using System.Reactive;
 using System.Reactive.Linq;

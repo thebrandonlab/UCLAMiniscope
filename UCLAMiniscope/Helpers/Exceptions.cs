@@ -1,15 +1,5 @@
-/*
-Description:
-  Custom exceptions for UCLA Miniscope operations.
-
-Author:
-  Clément Bourguignon
-  Brandon Lab @ McGill University
-  2025
-
-MIT License
-Copyright (c) 2024 Clément Bourguignon
-*/
+// SPDX-FileCopyrightText: 2024-2026 ClÃ©ment Bourguignon
+// SPDX-License-Identifier: MIT
 
 using System;
 

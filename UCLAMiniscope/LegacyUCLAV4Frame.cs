@@ -1,8 +1,10 @@
-﻿using OpenCV.Net;
+﻿// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
+
+using OpenCV.Net;
 using OpenCvSharp;
 using System;
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
@@ -14,11 +16,11 @@ using UCLAMiniscope.Helpers;
 namespace UCLAMiniscope
 {
     /// <summary>
-    /// Produces <see cref="FrameV4"/> objects from the UCLA Miniscope V4 using a shared capture instance.
+    /// Produces <see cref="LegacyFrameV4"/> objects from the UCLA Miniscope V4 using legacy DAQ firmware.
     /// Use this source when IMU data is not needed, or when IMU data is captured separately at a higher rate.
     /// </summary>
-    [Description("Produces FrameV4 objects from the UCLA Miniscope V4 using a shared capture instance, useful if IMU data is captured separately.")]
-    public class UCLAV4_Frame : Source<FrameV4>
+    [Description("Produces LegacyFrameV4 objects from the UCLA Miniscope V4 using legacy DAQ firmware, useful if IMU data is captured separately.")]
+    public class LegacyUCLAV4Frame : Source<LegacyFrameV4>
     {
         // Frame size
         const int Width = 608;
@@ -29,7 +31,6 @@ namespace UCLAMiniscope
 
         // Miniscope properties
         private int ledBrightness = 0;
-        private int lastLEDBrightness = 0;
         private int fps = 30;
         private int focus = 0;
         private bool triggered = false;
@@ -106,6 +107,13 @@ namespace UCLAMiniscope
         }
 
         /// <summary>
+        /// Gets or sets the position of the U.FL connector relative to the animal.
+        /// This determines the BNO055 axis mapping used by a companion IMU source.
+        /// </summary>
+        [Description("Position of the U.FL connector relative to the animal. Determines the IMU axis mapping.")]
+        public UFLConnectorLocation UFLConnectorLocation { get; set; } = Helpers.UFLConnectorLocation.FrontLeft;
+
+        /// <summary>
         /// Gets or sets whether to capture the input state.
         /// </summary>
         [Description("Grab Input state")]
@@ -124,37 +132,38 @@ namespace UCLAMiniscope
         [Description("True if you want to wait for reconnection, false if you want the workflow to stop.")]
         public bool WaitForReconnection { get; set; } = true;
 
-        readonly IObservable<FrameIMUV4> source;
-
         /// <summary>
-        /// Starts the miniscope capture loop and produces a sequence of <see cref="FrameV4"/> frames.
+        /// Starts the miniscope capture loop and produces a sequence of <see cref="LegacyFrameV4"/> frames.
         /// Automatically reconnects when <see cref="WaitForReconnection"/> is <see langword="true"/>.
         /// </summary>
-        /// <returns>An observable sequence of <see cref="FrameV4"/> frames captured from the miniscope.</returns>
-        public override IObservable<FrameV4> Generate()
+        /// <returns>An observable sequence of <see cref="LegacyFrameV4"/> frames captured from the miniscope.</returns>
+        public override IObservable<LegacyFrameV4> Generate()
         {
-            return Observable.Create<FrameV4>((observer, cancellationToken) =>
+            return Observable.Create<LegacyFrameV4>((observer, cancellationToken) =>
             {
                 return Task.Factory.StartNew(() =>
                 {
-                    var startTimeUtc = DateTime.UtcNow.Ticks - Stopwatch.GetTimestamp();
-
-                    using (var capture = new VideoCapture(CameraIndex, VideoCaptureAPIs.DSHOW))
+                    TimingService.TryInitialize();
+                    try
                     {
-
-                        while (!cancellationToken.IsCancellationRequested)
+                        using (var capture = new VideoCapture(CameraIndex, VideoCaptureAPIs.DSHOW))
                         {
-                            try
+
+                            while (!cancellationToken.IsCancellationRequested)
                             {
+                                try
+                                {
 
                                 if (!capture.IsOpened())
                                 {
                                     throw new NoMiniscopeException();
                                 }
 
+                                var deviceControls = new LegacyDeviceControls(capture);
+
                                 // Register capture with CaptureService
                                 string deviceId = $"V4_{CameraIndex}";
-                                CaptureService.RegisterCapture(deviceId, capture, "V4");
+                                CaptureService.RegisterCapture(deviceId, capture, deviceControls, "LegacyV4");
 
                                 var frame = new OpenCvSharp.Mat();
                                 var grayFrame = new OpenCvSharp.Mat();
@@ -162,33 +171,33 @@ namespace UCLAMiniscope
 
                                 try
                                 {
-                                    Hardware.V4.Initialize(capture);
+                                    MiniscopeV4Commands.Initialize(deviceControls, UFLConnectorLocation);
 
                                     // Set frame size
                                     capture.Set(VideoCaptureProperties.FrameWidth, Width);
                                     capture.Set(VideoCaptureProperties.FrameHeight, Height);
 
                                     // Start Digital Output switching
-                                    capture.Set(VideoCaptureProperties.Saturation, 1);
+                                    deviceControls.SetFrameOutputEnabled(true);
 
                                     Thread.Sleep(10); // to let everything settle
 
                                     // Subscribe to property changes
                                     disposables = new CompositeDisposable
                                     {
-                                        ledBrightnessSubject.DistinctUntilChanged().Subscribe(LEDBrightness => Hardware.V4.SetLEDBrightness(capture, LEDBrightness)),
-                                        fpsSubject.DistinctUntilChanged().Subscribe(FPS => Hardware.V4.SetFPS(capture, FPS)),
-                                        focusSubject.DistinctUntilChanged().Subscribe(Focus => Hardware.V4.SetFocus(capture, Focus)),
-                                        triggeredSubject.DistinctUntilChanged().Subscribe(Triggered => Hardware.V4.SetTriggerMode(capture, Triggered)),
-                                        gainSubject.DistinctUntilChanged().Subscribe(Gain => Hardware.V4.SetGain(capture, Gain)),
+                                        ledBrightnessSubject.DistinctUntilChanged().Subscribe(LEDBrightness => MiniscopeV4Commands.SetLEDBrightness(deviceControls, LEDBrightness)),
+                                        fpsSubject.DistinctUntilChanged().Subscribe(FPS => MiniscopeV4Commands.SetFPS(deviceControls, FPS)),
+                                        focusSubject.DistinctUntilChanged().Subscribe(Focus => MiniscopeV4Commands.SetFocus(deviceControls, Focus)),
+                                        triggeredSubject.DistinctUntilChanged().Subscribe(Triggered => MiniscopeV4Commands.SetLegacyTriggerMode(deviceControls, Triggered)),
+                                        gainSubject.DistinctUntilChanged().Subscribe(Gain => MiniscopeV4Commands.SetGain(deviceControls, Gain)),
                                     };
 
                                     // Set propoerties to initial values
-                                    Hardware.V4.SetTriggerMode(capture, Triggered);
-                                    Hardware.V4.SetFPS(capture, FPS);
-                                    Hardware.V4.SetGain(capture, gain);
-                                    Hardware.V4.SetFocus(capture, 127 * focus / 100);
-                                    Hardware.V4.SetLEDBrightness(capture, 255 - LEDBrightness * 255 / 100); // This needs to be set last
+                                    MiniscopeV4Commands.SetLegacyTriggerMode(deviceControls, Triggered);
+                                    MiniscopeV4Commands.SetFPS(deviceControls, FPS);
+                                    MiniscopeV4Commands.SetGain(deviceControls, gain);
+                                    MiniscopeV4Commands.SetFocus(deviceControls, 127 * focus / 100);
+                                    MiniscopeV4Commands.SetLEDBrightness(deviceControls, 255 - LEDBrightness * 255 / 100); // This needs to be set last
 
                                     // Initialize frame offset
                                     ushort lastContrast = (ushort)capture.Get(VideoCaptureProperties.Contrast);
@@ -200,8 +209,7 @@ namespace UCLAMiniscope
                                     while (!cancellationToken.IsCancellationRequested)
                                     {
                                         capture.Read(frame);
-                                        
-                                        var timestamp = (ulong)(startTimeUtc + Stopwatch.GetTimestamp());
+                                        long timestamp = TimingService.Stopwatch.ElapsedMilliseconds;
 
                                         if (frame.Empty())
                                         {
@@ -229,7 +237,7 @@ namespace UCLAMiniscope
 
                                         Cv2.CvtColor(frame, grayFrame, ColorConversionCodes.BGR2GRAY);
                                         var image = new IplImage(new OpenCV.Net.Size(grayFrame.Cols, grayFrame.Rows), IplDepth.U8, 1, grayFrame.Data);
-                                        observer.OnNext(new FrameV4(image, frameNumber, timestamp, inputState));
+                                        observer.OnNext(new LegacyFrameV4(image, frameNumber, timestamp, inputState));
                                     }
                                 }
                                 catch
@@ -238,8 +246,8 @@ namespace UCLAMiniscope
                                 finally
                                 {
                                     CaptureService.UnregisterCapture(deviceId);
-                                    capture.Set(VideoCaptureProperties.Saturation, 0);
-                                    Hardware.V4.SetLEDBrightness(capture, 255);
+                                    deviceControls.SetFrameOutputEnabled(false);
+                                    MiniscopeV4Commands.SetLEDBrightness(deviceControls, 255);
                                     Thread.Sleep(10); // to let the LED switch off
                                     frame.Dispose();
                                     grayFrame.Dispose();
@@ -248,21 +256,26 @@ namespace UCLAMiniscope
                                     disposables.Dispose();
                                 }
                             }
-                            catch (NoMiniscopeException)
-                            {
-                                if (WaitForReconnection)
+                                catch (NoMiniscopeException)
                                 {
+                                    if (WaitForReconnection)
+                                    {
 
-                                    Console.WriteLine($"miniscope couldn't be reached ({connectionTries})");
-                                    connectionTries++;
-                                    Thread.Sleep(1000);
-                                }
-                                else
-                                {
-                                    throw new WorkflowException("No miniscope or wrong index");
+                                        Console.WriteLine($"miniscope couldn't be reached ({connectionTries})");
+                                        connectionTries++;
+                                        Thread.Sleep(1000);
+                                    }
+                                    else
+                                    {
+                                        throw new WorkflowException("No miniscope or wrong index");
+                                    }
                                 }
                             }
                         }
+                    }
+                    finally
+                    {
+                        TimingService.Release();
                     }
                 }, cancellationToken, TaskCreationOptions.LongRunning, TaskScheduler.Default);
             })

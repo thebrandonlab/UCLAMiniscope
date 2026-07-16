@@ -1,100 +1,50 @@
-﻿/*
-UCLAV4.cs
+// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
 
-Description:
-  This class provides a source for capturing data from the UCLA Miniscope V4. It captures frames, BNO055 quaternion values,
-  and frame numbers, and provides configuration controls for LED brightness, focus, gain, and frame rate.
-
-Author:
-  Clément Bourguignon
-  Brandon Lab @ McGill University
-  2026
-
-Notes:
-  - OpenCV.NET takes a very long time to retrieve the IMU data. This node uses both OpenCvSharp for faster access to the camera
-    registers and OpenCV.NET for creating legacy IplImages to use in Bonsai.
-  - All relevant data besides the frame come from the camera registers:
-    - Saturation   -> Quaternion W and start/stop acquisition
-    - Hue          -> Quaternion X
-    - Gain         -> Quaternion Y
-    - Brightness   -> Quaternion Z
-    - Gamma        -> Inverted state of Trigger Input (3.3V -> Gamma = 0, 0V -> Gamma != 0)
-    - Contrast     -> DAQ Frame number
-  - No matter how I try tweaking process priority, only setting the power plan to "High Performance" gets a stable framerate.
-  - I didn't add a buffer as in the miniscope software, that would complicate things and most recent enough computers don't need one,
-    but that's something that can be considered.
-
-Dependencies:
-  - OpenCvSharp to comunicate with the DAQ
-  - OpenCV.Net to output legacy IplImages
-
-MIT License
-Copyright (c) 2026 Clément Bourguignon
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
-
+using Bonsai;
 using System;
 using System.ComponentModel;
-using System.Reactive.Linq;
+using System.Numerics;
 using System.Reactive.Disposables;
+using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Numerics;
-using System.Diagnostics;
-using OpenCvSharp;
-using OpenCV.Net;
-using Bonsai;
+using System.Xml.Serialization;
 using UCLAMiniscope.Helpers;
 
 namespace UCLAMiniscope
 {
     /// <summary>
-    /// Produces a data sequence from a UCLA Miniscope V4, capturing 608×608 grayscale frames with BNO055 IMU quaternion data.
-    /// Provides real-time controls for LED brightness, focus, gain, and frame rate.
+    /// Produces frames, embedded IMU data, and digital input state from a UCLA Miniscope V4
+    /// running current Open Ephys DAQ firmware.
     /// </summary>
-    [Description("Produces a data sequence from a UCLA Miniscope V4.")]
+    /// <remarks>
+    /// Uses the attributed current-firmware protocol helpers documented in THIRD_PARTY_NOTICES.md.
+    /// The node's reactive acquisition and recording integration are local.
+    /// </remarks>
+    [Description("Produces a data sequence from a UCLA Miniscope V4 using current Open Ephys DAQ firmware.")]
     public class UCLAV4 : Source<FrameIMUV4>
     {
-        // Frame size
         const int Width = 608;
         const int Height = 608;
+        const int ReconnectDelayMilliseconds = 1000;
 
-        // Miniscope properties
-        private int ledBrightness = 0;
-        private int fps = 30;
-        private int focus = 0;
-        private GainV4 gain = GainV4.Low;
+        readonly Subject<int> ledBrightnessSubject = new Subject<int>();
+        readonly Subject<int> fpsSubject = new Subject<int>();
+        readonly Subject<int> focusSubject = new Subject<int>();
+        readonly Subject<GainV4> gainSubject = new Subject<GainV4>();
+        readonly Subject<bool> triggeredSubject = new Subject<bool>();
+        readonly IObservable<FrameIMUV4> source;
 
-        // connection status
-        private int connectionTries = 0;
-
-        // Properties subscriptions
-        private CompositeDisposable disposables;
-        private readonly Subject<int> ledBrightnessSubject = new();
-        private readonly Subject<int> fpsSubject = new();
-        private readonly Subject<int> focusSubject = new();
-        private readonly Subject<GainV4> gainSubject = new();
+        int ledBrightness;
+        int fps = 30;
+        int focus;
+        GainV4 gain = GainV4.Low;
+        bool triggered;
 
         /// <summary>
-        /// Gets or sets the LED brightness (0-100%). Changes apply in real-time during capture.
+        /// Gets or sets the LED brightness as a percentage of maximum.
         /// </summary>
         [Description("Adjusts the intensity of the miniscope's LED (0-100%).")]
         [Range(0, 100)]
@@ -102,22 +52,30 @@ namespace UCLAMiniscope
         public int LEDBrightness
         {
             get => ledBrightness;
-            set { ledBrightness = value; ledBrightnessSubject.OnNext(255 - value * 255 / 100); }
+            set
+            {
+                ledBrightness = value;
+                ledBrightnessSubject.OnNext(value);
+            }
         }
 
         /// <summary>
-        /// Gets or sets the frame rate (10-30 FPS). Changes apply in real-time during capture.
+        /// Gets or sets the acquisition frame rate.
         /// </summary>
         [Description("Sets the framerate.")]
         [Range(10, 30)]
         public int FPS
         {
             get => fps;
-            set { fps = value; fpsSubject.OnNext(value); }
+            set
+            {
+                fps = value;
+                fpsSubject.OnNext(value);
+            }
         }
 
         /// <summary>
-        /// Gets or sets the electrowetting lens (EWL) focus (-127 to 127). Changes apply in real-time during capture.
+        /// Gets or sets the electrowetting lens focus adjustment.
         /// </summary>
         [Description("Sets the EWL focus.")]
         [Range(-127, 127)]
@@ -125,299 +83,369 @@ namespace UCLAMiniscope
         public int Focus
         {
             get => focus;
-            set { focus = value; focusSubject.OnNext(value); }
+            set
+            {
+                focus = value;
+                focusSubject.OnNext(value);
+            }
         }
 
         /// <summary>
-        /// Gets or sets the image sensor gain. Changes apply in real-time during capture.
+        /// Gets or sets the Python480 image sensor gain.
         /// </summary>
         [Description("Sets the gain of the image sensor.")]
         public GainV4 Gain
         {
             get => gain;
-            set { gain = value; gainSubject.OnNext(value); }
+            set
+            {
+                gain = value;
+                gainSubject.OnNext(value);
+            }
         }
 
         /// <summary>
-        /// Gets or sets whether the LED is controlled by an external trigger input.
-        /// When true, LED turns off when trigger input is low. Note: the trigger pin is low by default.
+        /// Gets or sets whether digital input 0 gates the excitation LED.
         /// </summary>
-        [Description("Turns off the LED when the trigger input is low. " +
-            "Note that this pin is low by default. Therefore, if it is not driven and " +
-            "this option is set to true, the LED will not turn on.")]
-        public bool Triggered { get; set; } = false;
+        [Description("Turns off the LED while digital input 0 is low. The input is low when undriven.")]
+        public bool Triggered
+        {
+            get => triggered;
+            set
+            {
+                triggered = value;
+                triggeredSubject.OnNext(value);
+            }
+        }
 
         /// <summary>
-        /// Gets or sets the camera index to capture from (for multiple V4 devices).
+        /// Gets or sets the position of the U.FL connector relative to the animal.
+        /// This determines the BNO055 axis mapping.
         /// </summary>
-        [Description("Index of the miniscope to capture from.")]
-        public int CameraIndex { get; set; } = 0;
+        [Description("Position of the U.FL connector relative to the animal. Determines the IMU axis mapping.")]
+        public UFLConnectorLocation UFLConnectorLocation { get; set; } = Helpers.UFLConnectorLocation.FrontLeft;
 
         /// <summary>
-        /// Gets or sets whether to wait for reconnection if the camera disconnects.
-        /// If false, the workflow will stop on disconnection.
+        /// Gets or sets the index within the connected current-firmware Miniscope DAQ list.
         /// </summary>
-        [Description("True if you want to wait for reconnection, false if you want the workflow to stop.")]
+        [Description("Index of the current-firmware miniscope DAQ to capture from.")]
+        public int CameraIndex { get; set; }
+
+        /// <summary>
+        /// Gets or sets whether acquisition waits and reconnects after a device failure.
+        /// </summary>
+        [Description("True to wait for reconnection after a device failure; false to stop the workflow.")]
         public bool WaitForReconnection { get; set; } = true;
 
         /// <summary>
-        /// Gets or sets whether to capture IMU data from the BNO055 sensor.
+        /// Gets or sets how Windows handles frames that arrive while the previous frame is being processed.
         /// </summary>
-        [Description("Grab IMU data")]
-        public bool GrabIMU { get; set; } = true;
+        [Description("Realtime delivers the latest frame; Buffered preserves frames in order while system memory is available.")]
+        public FrameAcquisitionMode AcquisitionMode { get; set; } = FrameAcquisitionMode.Realtime;
 
         /// <summary>
-        /// Gets or sets whether to capture the input state.
+        /// Gets or sets an optional display name used in recording metadata.
         /// </summary>
-        [Description("Grab Input state")]
-        public bool GrabInputState { get; set; } = false;
-
         [Description("Optional display name for this device. Defaults to the device ID if blank.")]
         public string DeviceName { get; set; } = "";
 
-        readonly IObservable<FrameIMUV4> source;
-        readonly object captureLock = new();
+        /// <summary>
+        /// Gets the firmware version reported by the connected DAQ extension unit.
+        /// </summary>
+        [Description("Firmware version reported by the connected DAQ.")]
+        [XmlIgnore]
+        public Version FirmwareVersion { get; private set; } = new Version(0, 0, 0);
 
         /// <summary>
-        /// Initializes a new instance of the <see cref="UCLAV4"/> class.
+        /// Initializes a new current-firmware UCLA Miniscope V4 source.
         /// </summary>
         public UCLAV4()
         {
             source = Observable.Create<FrameIMUV4>((observer, cancellationToken) =>
-            {
-                return Task.Factory.StartNew(() =>
-                {
-                    // Make sure this runs fast, probably not super useful but can't hurt
-                    Process currentProcess = Process.GetCurrentProcess();
-                    currentProcess.PriorityClass = ProcessPriorityClass.High;
-                    Thread.CurrentThread.Priority = ThreadPriority.Highest;
-
-                    string deviceId = $"V4_{CameraIndex}";
-
-                    RecordingMetadataService.Metadata = new RecordingMetadata
-                    {
-                        ROI = new Roi
-                        {
-                            height = 608,
-                            leftEdge = 0,
-                            topEdge = 0,
-                            width = 608
-                        },
-                        deviceID = CameraIndex,
-                        deviceName = string.IsNullOrWhiteSpace(DeviceName) ? deviceId : DeviceName,
-                        deviceType = "Miniscope_V4_BNO",
-                        ewl = focus,
-                        frameRate = FPS,
-                        gain = gain,
-                        led0 = LEDBrightness
-                    };
-                    DeviceMetadataRegistry.Register(deviceId, RecordingMetadataService.Metadata);
-
-                    // Initialize timing service if not already initialized by another source (e.g., MiniCam)
-                    TimingService.TryInitialize();
-
-                    Vector4 q = new(0, 0, 0, 0);
-
-                    lock (captureLock)
-                    {
-                        while (!cancellationToken.IsCancellationRequested)
-                        {
-                            try
-                            {
-                                using VideoCapture capture = new(CameraIndex, VideoCaptureAPIs.DSHOW);
-                                if (!capture.IsOpened())
-                                {
-                                    throw new NoMiniscopeException();
-                                }
-
-                                // Register with capture service
-                                CaptureService.RegisterCapture(deviceId, capture, "V4");
-
-                                OpenCvSharp.Mat frame = new();
-                                OpenCvSharp.Mat grayFrame = new();
-
-                                ulong frameNumber = 0;
-                                ushort contrast;
-                                ushort lastContrast;
-                                bool inputState = false;
-
-                                try
-                                {
-                                    Hardware.V4.Initialize(capture);
-
-                                    Thread.Sleep(500); // to let everything settle, increased for lower spec machines
-
-                                    // Set frame size
-                                    capture.Set(VideoCaptureProperties.FrameWidth, Width);
-                                    capture.Set(VideoCaptureProperties.FrameHeight, Height);
-
-                                    // Subscribe to property changes
-                                    disposables =
-                                    [
-                                        ledBrightnessSubject
-                                                .DistinctUntilChanged()
-                                                .Subscribe(LEDBrightness =>
-                                                {
-                                                    Hardware.V4.SetLEDBrightness(capture, LEDBrightness);
-                                                    RecordingMetadataService.Metadata.led0 = LEDBrightness;
-                                                }),
-                                            fpsSubject
-                                                .DistinctUntilChanged()
-                                                .Subscribe(FPS =>
-                                                {
-                                                    Hardware.V4.SetFPS(capture, FPS);
-                                                    RecordingMetadataService.Metadata.frameRate = FPS;
-                                                }),
-                                            focusSubject
-                                                .DistinctUntilChanged()
-                                                .Subscribe(Focus =>
-                                                {
-                                                    Hardware.V4.SetFocus(capture, Focus);
-                                                    RecordingMetadataService.Metadata.ewl = Focus;
-                                                }),
-                                            gainSubject
-                                                .DistinctUntilChanged()
-                                                .Subscribe(Gain =>
-                                                {
-                                                    Hardware.V4.SetGain(capture, Gain);
-                                                    RecordingMetadataService.Metadata.gain = Gain;
-                                                }),
-                                        ];
-
-                                    // Set propoerties to initial values, with delays for slower machines
-                                    Hardware.V4.SetTriggerMode(capture, Triggered);
-                                    Thread.Sleep(50);
-                                    Hardware.V4.SetFPS(capture, FPS);
-                                    Thread.Sleep(50);
-                                    Hardware.V4.SetGain(capture, gain);
-                                    Thread.Sleep(50);
-                                    Hardware.V4.SetFocus(capture, 127 * focus / 100);
-                                    Thread.Sleep(50);
-                                    Hardware.V4.SetLEDBrightness(capture, 255 - LEDBrightness * 255 / 100); // This needs to be set last
-                                    Thread.Sleep(50);
-
-                                    lastContrast = (ushort)capture.Get(VideoCaptureProperties.Contrast);
-                                    CaptureService.SetFrameOffset(deviceId, -lastContrast);
-
-                                    if (connectionTries == 0)  // keep the timer if the camera has to restart
-                                    {
-                                        TimingService.Stopwatch.Restart();
-                                    }
-
-                                    connectionTries = 0;
-
-                                    while (!cancellationToken.IsCancellationRequested)
-                                    {
-                                        // Capture frame
-                                        capture.Read(frame);
-
-                                        if (frame.Empty())
-                                        {
-                                            // Do we want it to throw an error instead of trying to reconnect?
-                                            Console.WriteLine("Camera might be disconnected, let's try to reconnect");
-                                            break;
-                                        }
-
-                                        var timestamp = TimingService.Stopwatch.ElapsedMilliseconds;
-
-                                        // Get latest hardware frame count
-                                        contrast = (ushort)capture.Get(VideoCaptureProperties.Contrast);
-
-                                        if (contrast < lastContrast)
-                                        {
-                                            CaptureService.SetFrameOffset(deviceId, (int)(frameNumber + 1));
-                                        }
-
-                                        lastContrast = contrast;
-
-                                        frameNumber = (uint)(contrast + CaptureService.GetFrameOffset(deviceId));
-
-                                        if (GrabIMU)
-                                        {
-                                            var candidate = QuaternionHelper.Read(capture);
-                                            bool candidateIsValid = QuaternionHelper.IsValid(candidate, out float candidateNormSquared);
-
-                                            // A corrupt or torn read must not replace the last good orientation.
-                                            if (candidateIsValid)
-                                            {
-                                                q = candidate;
-                                            }
-
-                                            // A near-zero norm cannot represent an orientation and indicates that
-                                            // the BNO055 has stopped after a brief power or coax interruption.
-                                            // This is the only check we do, if the BNO was starting to send constant
-                                            // garbage we would need to go back to CONFIG mode and reinitialize it, 
-                                            // but that has not happened in practice yet, so let's not do it for now.
-                                            if (candidateNormSquared < QuaternionHelper.FailureNormSquaredThreshold)
-                                            {
-                                                Hardware.SendI2C(capture, 0x50, 0x41, 0b00001001, 0b00000101); // Remap BNO axes and signs
-                                                Hardware.SendI2C(capture, 0x50, 0x3D, 0b00001100); // Set BNO operation mode to NDOF
-                                            }
-                                        }
-
-                                        if (GrabInputState)
-                                        {
-                                            // Get input state from inverted Gamma register
-                                            inputState = capture.Get(VideoCaptureProperties.Gamma) != 0;
-                                        }
-
-                                        // Create grayscale IplImage
-                                        Cv2.CvtColor(frame, grayFrame, ColorConversionCodes.BGR2GRAY);
-
-                                        // Create IplImage from OpenCvSharp Mat
-                                        IplImage image = new(new OpenCV.Net.Size(grayFrame.Cols, grayFrame.Rows), IplDepth.U8, 1, grayFrame.Data);
-
-                                        // Notify observer with the new frame
-                                        observer.OnNext(new FrameIMUV4(image, q, frameNumber, timestamp, inputState));
-                                    }
-                                }
-                                catch (Exception e)
-                                {
-                                    throw new WorkflowException(e.Message);
-                                }
-                                finally
-                                {
-                                    CaptureService.UnregisterCapture(deviceId);
-                                    DeviceMetadataRegistry.Unregister(deviceId);
-                                    Hardware.V4.SetLEDBrightness(capture, 255);
-                                    //capture.Set(VideoCaptureProperties.Saturation, 0);  // handled in StartRecording node
-                                    //RecordingService.IsRecording = false;
-                                    frame.Dispose();
-                                    grayFrame.Dispose();
-                                    Thread.Sleep(10); // to let the LED switch off before we dispose of capture
-                                    disposables.Dispose();
-                                    TimingService.Release(); // Release timing service reference when workflow stops
-                                }
-                            }
-                            catch (NoMiniscopeException)
-                            {
-                                if (WaitForReconnection)
-                                {
-                                    Console.WriteLine($"Miniscope couldn't be reached ({connectionTries})");
-                                    connectionTries++;
-                                    var delay = Math.Min(100 * Math.Pow(2, Math.Min(connectionTries, 6)), 10000); // Exponential backoff with a cap at 10 seconds
-                                    Thread.Sleep((int)delay);
-                                }
-                                else
-                                {
-                                    throw new WorkflowException("No miniscope or wrong index");
-                                }
-                            }
-                        }
-                    }
-                },
+                Task.Factory.StartNew(
+                    () => RunAcquisition(observer, cancellationToken),
                     cancellationToken,
                     TaskCreationOptions.LongRunning,
-                    TaskScheduler.Default);
-            })
-            .PublishReconnectable()
-            .RefCount();
+                    TaskScheduler.Default))
+                .PublishReconnectable()
+                .RefCount();
+        }
+
+        void RunAcquisition(IObserver<FrameIMUV4> observer, CancellationToken cancellationToken)
+        {
+            string deviceId = $"V4_{CameraIndex}";
+            var sequenceState = new FrameSequenceState();
+
+            var recordingMetadata = new RecordingMetadata
+            {
+                ROI = new Roi
+                {
+                    height = Height,
+                    leftEdge = 0,
+                    topEdge = 0,
+                    width = Width
+                },
+                deviceID = CameraIndex,
+                deviceName = string.IsNullOrWhiteSpace(DeviceName) ? deviceId : DeviceName,
+                deviceType = "Miniscope_V4_BNO",
+                firmwareGeneration = "current",
+                firmwareVersion = "unavailable",
+                ewl = Focus,
+                frameRate = FPS,
+                gain = Gain.ToString(),
+                led0 = LEDBrightness
+            };
+
+            RecordingMetadataService.Metadata = recordingMetadata;
+            DeviceMetadataRegistry.Register(deviceId, recordingMetadata);
+            TimingService.TryInitialize();
+
+            try
+            {
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    try
+                    {
+                        RunCaptureSession(observer, deviceId, recordingMetadata, sequenceState, cancellationToken);
+                        if (!cancellationToken.IsCancellationRequested)
+                            throw new InvalidOperationException("The Miniscope frame stream ended unexpectedly.");
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        if (!WaitForReconnection || IsFatalConfigurationError(ex))
+                        {
+                            observer.OnError(ex);
+                            return;
+                        }
+
+                        Console.WriteLine($"[UCLAV4] {ex.Message} Waiting for reconnection...");
+                        if (cancellationToken.WaitHandle.WaitOne(ReconnectDelayMilliseconds)) break;
+                    }
+                }
+            }
+            finally
+            {
+                CaptureService.UnregisterCapture(deviceId);
+                DeviceMetadataRegistry.Unregister(deviceId);
+                TimingService.Release();
+            }
+        }
+
+        void RunCaptureSession(
+            IObserver<FrameIMUV4> observer,
+            string deviceId,
+            RecordingMetadata recordingMetadata,
+            FrameSequenceState sequenceState,
+            CancellationToken cancellationToken)
+        {
+            ExtensionUnitMediaCapture capture = null;
+            ExtensionUnitDeviceControls controls = null;
+            CompositeDisposable controlSubscriptions = null;
+            Action<ExtensionUnitRawFrame> frameArrived = null;
+            bool registered = false;
+
+            try
+            {
+                capture = ExtensionUnitMediaCapture.Create(CameraIndex);
+                controls = capture.DeviceControls;
+                FirmwareVersion = capture.FirmwareVersion;
+                recordingMetadata.firmwareVersion = FirmwareVersion.ToString();
+
+                CaptureService.RegisterCapture(deviceId, controls, "V4");
+                registered = true;
+
+                MiniscopeV4Commands.Initialize(controls, UFLConnectorLocation);
+
+                var digitalInputSubject = new Subject<byte>();
+                controlSubscriptions = new CompositeDisposable();
+                controlSubscriptions.Add(digitalInputSubject);
+                SubscribeToControls(controls, digitalInputSubject, recordingMetadata, controlSubscriptions);
+
+                bool frameOriginInitialized = false;
+                bool imuRecoveryIssued = false;
+                Quaternion lastQuaternion = default;
+
+                frameArrived = rawFrame =>
+                {
+                    var metadata = ExtensionUnitFrameDecoder.DecodeMetadata(rawFrame);
+                    controls.UpdateFrameNumber(metadata.FrameNumber);
+
+                    if (!frameOriginInitialized)
+                    {
+                        long desiredFrameNumber = sequenceState.NextFrameNumber ?? 0;
+                        CaptureService.SetFrameOffset(deviceId, desiredFrameNumber - metadata.FrameNumber);
+                        frameOriginInitialized = true;
+                    }
+
+                    digitalInputSubject.OnNext(metadata.DigitalInputs);
+
+                    if (QuaternionHelper.IsValid(metadata.Quaternion, out float normSquared))
+                    {
+                        lastQuaternion = metadata.Quaternion;
+                        imuRecoveryIssued = false;
+                    }
+                    else if (normSquared < QuaternionHelper.FailureNormSquaredThreshold && !imuRecoveryIssued)
+                    {
+                        MiniscopeV4Commands.ReinitializeImu(controls, UFLConnectorLocation);
+                        imuRecoveryIssued = true;
+                    }
+
+                    long adjustedFrameNumber = (long)metadata.FrameNumber + CaptureService.GetFrameOffset(deviceId);
+                    if (adjustedFrameNumber < 0) adjustedFrameNumber = 0;
+                    sequenceState.NextFrameNumber = adjustedFrameNumber == long.MaxValue
+                        ? long.MaxValue
+                        : adjustedFrameNumber + 1;
+
+                    var image = ExtensionUnitFrameDecoder.CreateGrayscaleImage(rawFrame);
+                    bool delivered = false;
+                    try
+                    {
+                        observer.OnNext(new FrameIMUV4(
+                            image,
+                            lastQuaternion,
+                            (ulong)adjustedFrameNumber,
+                            rawFrame.ReceiveTimestamp,
+                            metadata.HardwareTime,
+                            metadata.DigitalInputs));
+                        delivered = true;
+                    }
+                    finally
+                    {
+                        if (!delivered) image.Dispose();
+                    }
+                };
+
+                capture.FrameArrived += frameArrived;
+                capture.Start(Width, Height, AcquisitionMode, cancellationToken);
+                capture.Wait(cancellationToken);
+            }
+            finally
+            {
+                if (capture != null)
+                {
+                    if (frameArrived != null)
+                        capture.FrameArrived -= frameArrived;
+                    capture.Stop();
+                }
+
+                controlSubscriptions?.Dispose();
+
+                if (controls != null)
+                {
+                    try
+                    {
+                        controls.SetFrameOutputEnabled(false);
+                        MiniscopeV4Commands.SetLEDBrightness(controls, 255);
+                    }
+                    catch (Exception)
+                    {
+                        // Cleanup commonly runs after the USB device has already disappeared.
+                    }
+                }
+
+                if (capture != null)
+                    capture.Dispose();
+
+                if (registered)
+                    CaptureService.UnregisterCapture(deviceId);
+            }
+        }
+
+        void SubscribeToControls(
+            ExtensionUnitDeviceControls controls,
+            IObservable<byte> digitalInputs,
+            RecordingMetadata recordingMetadata,
+            CompositeDisposable subscriptions)
+        {
+            var brightness = ledBrightnessSubject
+                .StartWith(LEDBrightness)
+                .Select(value => Math.Max(0, Math.Min(100, value)))
+                .DistinctUntilChanged();
+
+            var triggerEnabled = triggeredSubject
+                .StartWith(Triggered)
+                .DistinctUntilChanged();
+
+            var inputHigh = digitalInputs
+                .StartWith((byte)0)
+                .Select(value => (value & 0x01) != 0)
+                .DistinctUntilChanged();
+
+            subscriptions.Add(
+                brightness
+                    .CombineLatest(
+                        triggerEnabled,
+                        (value, isTriggered) => new { Brightness = value, IsTriggered = isTriggered })
+                    .CombineLatest(
+                        inputHigh,
+                        (led, isInputHigh) => new
+                        {
+                            led.Brightness,
+                            EncodedBrightness = led.IsTriggered && !isInputHigh
+                                ? (byte)255
+                                : (byte)(255 - led.Brightness * 255 / 100)
+                        })
+                    .DistinctUntilChanged()
+                    .Subscribe(value =>
+                    {
+                        MiniscopeV4Commands.SetLEDBrightness(controls, value.EncodedBrightness);
+                        recordingMetadata.led0 = value.Brightness;
+                    }));
+
+            subscriptions.Add(
+                fpsSubject
+                    .StartWith(FPS)
+                    .DistinctUntilChanged()
+                    .Subscribe(value =>
+                    {
+                        if (value < 10 || value > 30)
+                            throw new ArgumentOutOfRangeException(nameof(FPS), "FPS must be between 10 and 30.");
+
+                        MiniscopeV4Commands.QueueFPS(controls, value);
+                        controls.I2C.CommitCommands();
+                        recordingMetadata.frameRate = value;
+                    }));
+
+            subscriptions.Add(
+                focusSubject
+                    .StartWith(Focus)
+                    .Select(value => Math.Max(-127, Math.Min(127, value)))
+                    .DistinctUntilChanged()
+                    .Subscribe(value =>
+                    {
+                        MiniscopeV4Commands.SetFocus(controls, value);
+                        recordingMetadata.ewl = value;
+                    }));
+
+            subscriptions.Add(
+                gainSubject
+                    .StartWith(Gain)
+                    .DistinctUntilChanged()
+                    .Subscribe(value =>
+                    {
+                        MiniscopeV4Commands.SetGain(controls, value);
+                        recordingMetadata.gain = value.ToString();
+                    }));
+
+        }
+
+        static bool IsFatalConfigurationError(Exception exception)
+        {
+            return exception is NotSupportedException || exception is ArgumentException;
+        }
+
+        sealed class FrameSequenceState
+        {
+            public long? NextFrameNumber { get; set; }
         }
 
         /// <summary>
-        /// Generates an observable sequence of Miniscope V4 frames with IMU data.
+        /// Generates the current-firmware UCLA Miniscope V4 data sequence.
         /// </summary>
-        /// <returns>An observable sequence of <see cref="FrameIMUV4"/> objects.</returns>
         public override IObservable<FrameIMUV4> Generate()
         {
             return source;

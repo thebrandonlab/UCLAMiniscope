@@ -1,4 +1,7 @@
-﻿using System;
+﻿// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
+
+using System;
 using System.ComponentModel;
 using System.Reactive.Linq;
 using System.Threading;
@@ -11,18 +14,25 @@ using UCLAMiniscope.Helpers;
 namespace UCLAMiniscope
 {
     /// <summary>
-    /// Emits quaternion IMU data from a UCLA Miniscope V4 BNO055 sensor at a configurable sample rate.
+    /// Emits quaternion IMU data from a UCLA Miniscope V4 BNO055 sensor using legacy DAQ firmware.
     /// This allows IMU data to be streamed independently from the video frame rate.
     /// </summary>
-    [Description("Emits quaternion IMU data from a UCLA V4 capture stream.")]
-    public class UCLAV4_IMU : Source<Vector4>
+    [Description("Emits quaternion IMU data from a UCLA V4 legacy-firmware capture stream.")]
+    public class LegacyUCLAV4IMU : Source<Quaternion>
     {
         /// <summary>
         /// Gets or sets the device index of the V4 miniscope to read IMU data from.
-        /// Must match the CameraIndex of the corresponding UCLAV4 source.
+        /// Must match the CameraIndex of the corresponding LegacyUCLAV4 source.
         /// </summary>
-        [Description("Index of the V4 miniscope to get IMU data from. Must match the CameraIndex of the UCLAV4_Frame source.")]
+        [Description("Index of the V4 miniscope to get IMU data from. Must match the CameraIndex of the LegacyUCLAV4Frame source.")]
         public int DeviceIndex { get; set; } = 0;
+
+        /// <summary>
+        /// Gets or sets the position of the U.FL connector relative to the animal.
+        /// This must match the companion legacy capture source.
+        /// </summary>
+        [Description("Position of the U.FL connector relative to the animal. Must match the companion capture source.")]
+        public UFLConnectorLocation UFLConnectorLocation { get; set; } = Helpers.UFLConnectorLocation.FrontLeft;
 
         /// <summary>
         /// Gets or sets the IMU sampling rate in Hz.
@@ -40,17 +50,18 @@ namespace UCLAMiniscope
         /// <summary>
         /// Generates an observable sequence of quaternion IMU data.
         /// </summary>
-        /// <returns>An observable sequence of <see cref="Vector4"/> quaternions representing orientation.</returns>
-        public override IObservable<Vector4> Generate()
+        /// <returns>An observable sequence of <see cref="Quaternion"/> values representing orientation.</returns>
+        public override IObservable<Quaternion> Generate()
         {
-            return Observable.Create<Vector4>((observer, cancellationToken) =>
+            return Observable.Create<Quaternion>((observer, cancellationToken) =>
             {
                 return Task.Run(() =>
                 {
                     string deviceId = $"V4_{DeviceIndex}";
-                    Vector4 q = new(0, 0, 0, 0);
+                    Quaternion q = new(0, 0, 0, 0);
                     int sleepMs = 1000 / SampleRate;
                     VideoCapture capture = null;
+                    IDeviceControls deviceControls = null;
 
                     // Wait for the capture device to be registered
                     if (WaitForCapture)
@@ -58,10 +69,11 @@ namespace UCLAMiniscope
                         while (!cancellationToken.IsCancellationRequested && capture == null)
                         {
                             var captureInfo = CaptureService.GetCapture(deviceId);
-                            if (captureInfo != null)
+                            if (captureInfo?.Capture != null && captureInfo.DeviceControls is IDeviceControls controls)
                             {
                                 capture = captureInfo.Capture;
-                                Console.WriteLine($"[UCLAV4_IMU] Found capture device {deviceId}");
+                                deviceControls = controls;
+                                Console.WriteLine($"[LegacyUCLAV4IMU] Found capture device {deviceId}");
                             }
                             else
                             {
@@ -73,11 +85,12 @@ namespace UCLAMiniscope
                     {
                         var captureInfo = CaptureService.GetCapture(deviceId);
                         capture = captureInfo?.Capture;
+                        deviceControls = captureInfo?.DeviceControls as IDeviceControls;
                     }
 
-                    if (capture == null && !WaitForCapture)
+                    if ((capture == null || deviceControls == null) && !WaitForCapture)
                     {
-                        observer.OnError(new InvalidOperationException($"Capture device {deviceId} not found. Make sure UCLAV4_Frame is running with matching DeviceIndex."));
+                        observer.OnError(new InvalidOperationException($"Compatible legacy capture device {deviceId} not found. Make sure LegacyUCLAV4Frame is running with matching DeviceIndex."));
                         return;
                     }
 
@@ -100,8 +113,7 @@ namespace UCLAMiniscope
                             // the BNO055 has stopped after a brief power or coax interruption.
                             if (candidateNormSquared < QuaternionHelper.FailureNormSquaredThreshold)
                             {
-                                Hardware.SendI2C(capture, 0x50, 0x41, 0b00001001, 0b00000101); // Remap BNO axes and signs
-                                Hardware.SendI2C(capture, 0x50, 0x3D, 0b00001100); // Set BNO operation mode to NDOF
+                                MiniscopeV4Commands.ReinitializeImu(deviceControls, UFLConnectorLocation);
                             }
 
                             observer.OnNext(q);

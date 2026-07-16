@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
+
 using Bonsai;
 using Bonsai.Design;
 using Bonsai.Vision.Design;
@@ -8,13 +11,13 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
 
-[assembly: TypeVisualizer(typeof(UCLAMiniscope.Design.QuaternionOrientationVisualizer), Target = typeof(System.Numerics.Vector4))]
+[assembly: TypeVisualizer(typeof(UCLAMiniscope.Design.QuaternionOrientationVisualizer), Target = typeof(System.Numerics.Quaternion))]
 
 namespace UCLAMiniscope.Design
 {
     /// <summary>
     /// Displays a mouse-head model and direction arrow driven by a BNO055 quaternion
-    /// (<see cref="System.Numerics.Vector4"/> with components X,Y,Z,W).
+    /// (<see cref="System.Numerics.Quaternion"/> with components X,Y,Z,W).
     /// Uses the OpenGL context already provided by <see cref="VisualizerCanvas"/> —
     /// no extra packages required.
     /// </summary>
@@ -34,14 +37,14 @@ namespace UCLAMiniscope.Design
         bool glReady;
 
         static readonly Matrix4 ViewMatrix = Matrix4.LookAt(
-            new Vector3(0.4f, 1.2f, -2.6f),
+            new Vector3(2.6f, -0.8f, 1.2f),
             Vector3.Zero,
-            Vector3.UnitY);
-        static readonly Vector3 LightDirection = new Vector3(0.5f, 1.0f, 0.7f).Normalized();
-        static readonly Matrix4 EarLeftLocal = Matrix4.CreateTranslation(-0.30f, 0.10f, -0.10f);
-        static readonly Matrix4 EarRightLocal = Matrix4.CreateTranslation(0.30f, 0.10f, -0.10f);
-        static readonly Matrix4 ArrowLocal = Matrix4.CreateRotationX(MathHelper.PiOver2)
-            * Matrix4.CreateTranslation(0f, 0f, 0.40f);
+            Vector3.UnitZ);
+        static readonly Vector3 LightDirection = new Vector3(0.7f, -0.5f, 1.0f).Normalized();
+        static readonly Matrix4 EarLeftLocal = Matrix4.CreateTranslation(-0.10f, 0.30f, 0.10f);
+        static readonly Matrix4 EarRightLocal = Matrix4.CreateTranslation(-0.10f, -0.30f, 0.10f);
+        static readonly Matrix4 ArrowLocal = Matrix4.CreateRotationZ(-MathHelper.PiOver2)
+            * Matrix4.CreateTranslation(0.40f, 0f, 0f);
 
         // ── GLSL 1.20 shaders (OpenGL 2.0+, compatibility context) ─────────────
 
@@ -71,6 +74,7 @@ void main() {
 
         // ── Lifecycle ────────────────────────────────────────────────────────────
 
+        /// <inheritdoc/>
         public override void Load(IServiceProvider provider)
         {
             canvas = new VisualizerCanvas { Dock = DockStyle.Fill, Size = new Size(240, 240) };
@@ -82,16 +86,17 @@ void main() {
             svc?.AddControl(canvas);
         }
 
+        /// <inheritdoc/>
         public override void Show(object value)
         {
-            var v = (System.Numerics.Vector4)value;
+            var v = (System.Numerics.Quaternion)value;
             float normSquared = v.W * v.W + v.X * v.X + v.Y * v.Y + v.Z * v.Z;
             if (float.IsNaN(normSquared) || float.IsInfinity(normSquared)) return;
 
             float norm = (float)Math.Sqrt(normSquared);
             if (Math.Abs(norm - 1f) >= QuaternionNormTolerance) return;
 
-            // Store a unit quaternion and retain the previous snapshot on a bad sample.
+            // Normalize accepted samples for rendering.
             float inverseNorm = 1f / norm;
             snapshot = new QuatSnapshot(
                 v.X * inverseNorm,
@@ -101,6 +106,7 @@ void main() {
             canvas?.Canvas.Invalidate();
         }
 
+        /// <inheritdoc/>
         public override void Unload()
         {
             if (canvas == null) return;
@@ -141,8 +147,9 @@ void main() {
 
             // Arrow: 0.50 units long — placed at nose tip in Render
             UploadMesh(BuildArrow(16, 0.035f, 0.09f, 0.34f, 0.16f),  out vaoArrow, out vboArrow, out arrowVertCount);
-            // Head body: ellipsoid elongated along +Z (forward), pre-scaled so mat3(rot) stays correct
-            UploadMesh(BuildEllipsoid(12, 20, 0.28f, 0.16f, 0.40f),   out vaoHead,  out vboHead,  out headVertCount);
+            // The model uses the same reference frame as the configured IMU:
+            // X forward, Y left, Z up.
+            UploadMesh(BuildEllipsoid(12, 20, 0.40f, 0.28f, 0.16f),   out vaoHead,  out vboHead,  out headVertCount);
             // Ears: uniform sphere r=0.11, same mesh re-used for both sides
             UploadMesh(BuildEllipsoid(8,  12, 0.11f, 0.11f, 0.11f),   out vaoEar,   out vboEar,   out earVertCount);
 
@@ -192,11 +199,11 @@ void main() {
             GL.Enable(EnableCap.DepthTest);
             GL.UseProgram(program);
 
-            // BNO X/Y/Z (roll/pitch/yaw) map to model Z/X/Y.
-            var q = new Quaternion(snap.Y, snap.Z, snap.X, snap.W);
+            // The model and configured IMU use the same X-forward, Y-left, Z-up basis.
+            var q = new Quaternion(snap.X, snap.Y, snap.Z, snap.W);
             var rot = Matrix4.CreateFromQuaternion(q);
 
-            // ── Head body (pre-scaled ellipsoid, elongated along +Z) ──────────────
+            // ── Head body (pre-scaled ellipsoid, elongated along +X) ──────────────
             GL.Uniform3(uColor, 0.62f, 0.55f, 0.48f);   // warm beige
             GL.UniformMatrix4(uModel, false, ref rot);
             GL.BindVertexArray(vaoHead);
@@ -214,8 +221,8 @@ void main() {
             GL.UniformMatrix4(uModel, false, ref earR);
             GL.DrawArrays(PrimitiveType.Triangles, 0, earVertCount);
 
-            // ── Arrow: points along +Z from the nose tip (z = +0.40) ──────────────
-            // Arrow mesh is along +Y; Rx(+90°) rotates +Y→+Z; then translate to nose.
+            // ── Arrow: points along +X from the nose tip (x = +0.40) ──────────────
+            // Arrow mesh is along +Y; Rz(-90°) rotates +Y→+X; then translate to nose.
             GL.Uniform3(uColor, 0.10f, 0.82f, 1.00f);   // cyan
             var arrowModel = ArrowLocal * rot;
             GL.UniformMatrix4(uModel, false, ref arrowModel);

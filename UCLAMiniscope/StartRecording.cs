@@ -1,8 +1,11 @@
-﻿using Bonsai;
-using OpenCvSharp;
+﻿// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
+
+using Bonsai;
 using System;
 using System.ComponentModel;
 using System.IO;
+using System.Linq;
 using System.Reactive.Linq;
 using System.Text.Json;
 using UCLAMiniscope.Helpers;
@@ -40,6 +43,11 @@ namespace UCLAMiniscope
                 {
                     if (!RecordingService.IsRecording)
                     {
+                        // Freeze the session name at the instant the start trigger is received.
+                        DateTime startTime = DateTime.Now;
+                        RecordingService.Date = startTime.ToString("yyyy_MM_dd");
+                        RecordingService.Time = startTime.ToString("HH_mm_ss");
+
                         // Reset the recording timer
                         TimingService.Stopwatch.Restart();
 
@@ -55,30 +63,24 @@ namespace UCLAMiniscope
                             Console.WriteLine($"[StartRecording] Starting recording for {captures.Count} device(s)");
                         }
 
-                        // Initialize each device
-                        foreach (var kvp in captures)
-                        {
-                            string deviceId = kvp.Key;
-                            var captureInfo = kvp.Value;
+                        var deviceIds = captures.Keys.Union(DeviceMetadataRegistry.GetAll().Keys).ToList();
 
+                        // Initialize each device, including temporarily disconnected sources.
+                        foreach (string deviceId in deviceIds)
+                        {
                             try
                             {
-                                // Reset frame offset
-                                int currentContrast = (int)captureInfo.Capture.Get(VideoCaptureProperties.Contrast);
-                                CaptureService.SetFrameOffset(deviceId, -currentContrast);
+                                // Reset the software frame origin using the active DAQ transport.
+                                CaptureService.ResetFrameOffset(deviceId);
 
                                 // Start Digital Output switching on the DAQ
-                                captureInfo.Capture.Set(VideoCaptureProperties.Saturation, 1);
+                                CaptureService.SetFrameOutputEnabled(deviceId, true);
                             }
                             catch (Exception ex)
                             {
                                 Console.WriteLine($"[StartRecording] Error initializing {deviceId}: {ex.Message}");
                             }
                         }
-
-                        // Set the recording service fields
-                        RecordingService.Date = DateTime.Now.ToString("yyyy_MM_dd");
-                        RecordingService.Time = DateTime.Now.ToString("HH_mm_ss");
 
                         string sessionFolder = Path.Combine(MouseInfoService.RootPath, MouseInfoService.MouseID, RecordingService.Date, RecordingService.Time);
                         Directory.CreateDirectory(sessionFolder);
@@ -104,21 +106,19 @@ namespace UCLAMiniscope
                 {
                     if (RecordingService.IsRecording)
                     {
-                        // Get all registered capture devices
+                        // Include temporarily disconnected sources so they remain disabled after reconnection.
                         var captures = CaptureService.GetAllCaptures();
+                        var deviceIds = captures.Keys.Union(DeviceMetadataRegistry.GetAll().Keys).ToList();
 
-                        Console.WriteLine($"[StartRecording] Stopping recording for {captures.Count} device(s)");
+                        Console.WriteLine($"[StartRecording] Stopping recording for {deviceIds.Count} device(s)");
 
                         // Stop Digital Output switching on each device
-                        foreach (var kvp in captures)
+                        foreach (string deviceId in deviceIds)
                         {
-                            string deviceId = kvp.Key;
-                            var captureInfo = kvp.Value;
-
                             try
                             {
                                 // Stop Digital Output switching on the DAQ
-                                captureInfo.Capture.Set(VideoCaptureProperties.Saturation, 0);
+                                CaptureService.SetFrameOutputEnabled(deviceId, false);
                             }
                             catch (Exception ex)
                             {

@@ -1,22 +1,5 @@
-﻿//
-// DeltaFOverF.cs
-//
-// Description:
-//   This class defines a Bonsai transform node that normalizes each input frame by a baseline computed over a 
-//   configurable number of frames. The baseline is updated at a specified frequency, allowing the normalization 
-//   to adapt to changes over time.
-//
-// Usage:
-//   - The `BufferCapacity` property defines the number of frames to be used for calculating the baseline.
-//   - The `UpdateFrequency` property specifies how often the baseline is updated, in number of frames.
-//   - The node processes each incoming frame, normalizes it against the baseline, and outputs the ratioing 
-//     normalized frame.
-//
-// Author:
-//   Clément Bourguignon
-//   Brandon Lab @ McGill University
-//   2025
-//
+﻿// SPDX-FileCopyrightText: 2025-2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
 
 using OpenCV.Net;
 using System;

@@ -1,15 +1,17 @@
-﻿using Bonsai;
-using OpenCvSharp;
+﻿// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
+
+using Bonsai;
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reactive.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using UCLAMiniscope.Helpers;
 
 namespace UCLAMiniscope
 {
+    /// <summary>
+    /// Enables the frame-output signal on all registered DAQ devices when the source emits.
+    /// </summary>
     public class StartOutput : Combinator
     {
         /// <summary>
@@ -23,19 +25,17 @@ namespace UCLAMiniscope
             return source
                 .Do(_ =>
                 {
-                    // Get all registered capture devices
+                    // Include temporarily disconnected sources so their requested state is restored on reconnection.
                     var captures = CaptureService.GetAllCaptures();
+                    var deviceIds = captures.Keys.Union(DeviceMetadataRegistry.GetAll().Keys);
 
                     // Initialize each device
-                    foreach (var kvp in captures)
+                    foreach (string deviceId in deviceIds)
                     {
-                        string deviceId = kvp.Key;
-                        var captureInfo = kvp.Value;
-
                         try
                         {
                             // Start Digital Output switching on the DAQ
-                            captureInfo.Capture.Set(VideoCaptureProperties.Saturation, 1);
+                            CaptureService.SetFrameOutputEnabled(deviceId, true);
                         }
                         catch (Exception ex)
                         {

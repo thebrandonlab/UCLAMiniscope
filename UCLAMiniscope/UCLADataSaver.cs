@@ -1,13 +1,16 @@
-﻿using System;
+﻿// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
+
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Numerics;
 using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Text;
+using System.Threading;
 using Bonsai;
 using Bonsai.Vision;
 using OpenCV.Net;
@@ -16,10 +19,10 @@ using UCLAMiniscope.Helpers;
 namespace UCLAMiniscope
 {
     /// <summary>
-    /// Saves Miniscope video and a single timestamps.csv containing FrameNumber, TimeStamp_ms,
-    /// and optionally quaternion and input columns.
+    /// Saves Miniscope video and a timestamps.csv containing every metadata field available
+    /// on the input frame type.
     /// </summary>
-    [Description("Saves Miniscope video and a single timestamps.csv (FrameNumber, TimeStamp_ms, and optionally quat/input columns).")]
+    [Description("Saves Miniscope video and all frame metadata to timestamps.csv.")]
     [WorkflowElementCategory(ElementCategory.Sink)]
     public class UCLADataSaver : Sink<FrameIMUV4>
     {
@@ -55,19 +58,6 @@ namespace UCLAMiniscope
         /// </summary>
         [Description("Video container format to use, e.g. mkv, mp4, ...")]
         public string VideoContainer { get; set; } = "mkv";
-
-        /// <summary>
-        /// Gets or sets a value indicating whether qw/qx/qy/qz columns are appended to timestamps.csv.
-        /// Only applies when the frame type carries quaternion data.
-        /// </summary>
-        [Description("Append qw/qx/qy/qz columns to timestamps.csv (only applies if the frame type carries quaternion data).")]
-        public bool WriteQuaternion { get; set; } = true;
-
-        /// <summary>
-        /// Gets or sets a value indicating whether an Input column (0/1) is appended at the end of timestamps.csv.
-        /// </summary>
-        [Description("Append an Input column (0/1) at the end of timestamps.csv.")]
-        public bool WriteInput { get; set; } = true;
 
         /// <summary>
         /// Gets or sets the folder name used for this device under the output path.
@@ -116,7 +106,13 @@ namespace UCLAMiniscope
                         if (CropOutputVideo)
                         {
                             var croppedImage = frame.Image.GetSubRect(RegionOfInterest);
-                            frame = new FrameIMUV4(croppedImage, frame.Quaternion, frame.FrameNumber, frame.Timestamp, frame.Input);
+                            frame = new FrameIMUV4(
+                                croppedImage,
+                                frame.Quaternion,
+                                frame.FrameNumber,
+                                frame.ReceiveTimestamp,
+                                frame.HardwareTimestamp,
+                                frame.DigitalInputs);
                         }
 
                         if (!RecordingService.IsRecording)
@@ -125,19 +121,39 @@ namespace UCLAMiniscope
                             return;
                         }
 
-                    // initialise once, **exactly on the first recorded frame**
-                    if (recorder == null)
-                    {
-                        var Width = frame.Image.Width;
-                        var Height = frame.Image.Height;
-
-                        lock (gate)
+                        // Initialize the writer from the first frame dimensions, but do not record
+                        // frames received before FFmpeg has connected to the named pipe.
+                        if (recorder == null)
                         {
-                            recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, WriteInput, hasQuaternion: true, deviceFolderName: DeviceFolderName, subFolderPattern: SubFolderPattern);
+                            int width = frame.Image.Width;
+                            int height = frame.Image.Height;
+
+                            lock (gate)
+                            {
+                                recorder ??= new Recorder(
+                                    BaseVideoName,
+                                    VideoContainer,
+                                    SegmentFrames,
+                                    width,
+                                    height,
+                                    VideoCodec,
+                                    ExtraCodecArgs,
+                                    CsvSchema.CurrentV4,
+                                    deviceFolderName: DeviceFolderName,
+                                    subFolderPattern: SubFolderPattern);
+                            }
+
+                            observer.OnNext(frame);
+                            return;
                         }
-                    }
-                    
-                        recorder.WriteCsv(frame.FrameNumber, frame.Timestamp, frame.Input, frame.Quaternion);
+
+                        if (!recorder.IsReady)
+                        {
+                            observer.OnNext(frame);
+                            return;
+                        }
+
+                        recorder.WriteCsv(frame);
                         recorder.WriteVideo(frame.Image);
                         observer.OnNext(frame);
                     }
@@ -149,6 +165,83 @@ namespace UCLAMiniscope
                 // ensure recorder disposed when workflow stops, even if OnCompleted never fires
                 var cd = new CompositeDisposable(sub, Disposable.Create(() => recorder?.Dispose()));
                 return cd;
+            });
+        }
+
+        /// <summary>
+        /// Saves frames produced by the legacy-firmware V4 source.
+        /// </summary>
+        public IObservable<LegacyFrameIMUV4> Process(IObservable<LegacyFrameIMUV4> source)
+        {
+            return Observable.Create<LegacyFrameIMUV4>(observer =>
+            {
+                Recorder recorder = null;
+                var gate = new object();
+
+                var sub = source.Subscribe(frame =>
+                {
+                    try
+                    {
+                        if (CropOutputVideo)
+                        {
+                            var croppedImage = frame.Image.GetSubRect(RegionOfInterest);
+                            frame = new LegacyFrameIMUV4(
+                                croppedImage,
+                                frame.Quaternion,
+                                frame.FrameNumber,
+                                frame.ReceiveTimestamp,
+                                frame.Input);
+                        }
+
+                        if (!RecordingService.IsRecording)
+                        {
+                            observer.OnNext(frame);
+                            return;
+                        }
+
+                        if (recorder == null)
+                        {
+                            int width = frame.Image.Width;
+                            int height = frame.Image.Height;
+
+                            lock (gate)
+                            {
+                                recorder ??= new Recorder(
+                                    BaseVideoName,
+                                    VideoContainer,
+                                    SegmentFrames,
+                                    width,
+                                    height,
+                                    VideoCodec,
+                                    ExtraCodecArgs,
+                                    CsvSchema.LegacyV4,
+                                    deviceFolderName: DeviceFolderName,
+                                    subFolderPattern: SubFolderPattern);
+                            }
+
+                            observer.OnNext(frame);
+                            return;
+                        }
+
+                        if (!recorder.IsReady)
+                        {
+                            observer.OnNext(frame);
+                            return;
+                        }
+
+                        recorder.WriteCsv(frame);
+                        recorder.WriteVideo(frame.Image);
+                        observer.OnNext(frame);
+                    }
+                    catch (Exception ex)
+                    {
+                        observer.OnError(ex);
+                    }
+                },
+                ex => { recorder?.Dispose(); observer.OnError(ex); },
+                () => { recorder?.Dispose(); observer.OnCompleted(); });
+
+                return new CompositeDisposable(sub, Disposable.Create(() => recorder?.Dispose()));
             });
         }
 
@@ -173,7 +266,12 @@ namespace UCLAMiniscope
                         if (CropOutputVideo)
                         {
                             var croppedImage = frame.Image.GetSubRect(RegionOfInterest);
-                            frame = new FrameMiniCam(croppedImage, frame.FrameNumber, frame.Timestamp, frame.Input);
+                            frame = new FrameMiniCam(
+                                croppedImage,
+                                frame.FrameNumber,
+                                frame.ReceiveTimestamp,
+                                frame.HardwareTimestamp,
+                                frame.DigitalInputs);
                         }
 
                         if (!RecordingService.IsRecording)
@@ -182,19 +280,39 @@ namespace UCLAMiniscope
                             return;
                         }
 
-                        // initialise once, on the first recorded frame
+                        // Initialize the writer from the first frame dimensions, but do not record
+                        // frames received before FFmpeg has connected to the named pipe.
                         if (recorder == null)
                         {
-                            var Width = frame.Image.Width;
-                            var Height = frame.Image.Height;
+                            int width = frame.Image.Width;
+                            int height = frame.Image.Height;
 
                             lock (gate)
                             {
-                                recorder ??= new Recorder(BaseVideoName, VideoContainer, SegmentFrames, Width, Height, VideoCodec, ExtraCodecArgs, WriteQuaternion, WriteInput, hasQuaternion: false, deviceFolderName: DeviceFolderName, subFolderPattern: SubFolderPattern);
+                                recorder ??= new Recorder(
+                                    BaseVideoName,
+                                    VideoContainer,
+                                    SegmentFrames,
+                                    width,
+                                    height,
+                                    VideoCodec,
+                                    ExtraCodecArgs,
+                                    CsvSchema.CurrentMiniCam,
+                                    deviceFolderName: DeviceFolderName,
+                                    subFolderPattern: SubFolderPattern);
                             }
+
+                            observer.OnNext(frame);
+                            return;
                         }
 
-                        recorder.WriteCsv(frame.FrameNumber, frame.Timestamp, frame.Input, quaternion: null);
+                        if (!recorder.IsReady)
+                        {
+                            observer.OnNext(frame);
+                            return;
+                        }
+
+                        recorder.WriteCsv(frame);
                         recorder.WriteVideo(frame.Image);
                         observer.OnNext(frame);
                     }
@@ -209,18 +327,105 @@ namespace UCLAMiniscope
             });
         }
 
+        // -- overload for LegacyFrameMiniCam ------------------------------
+        /// <summary>
+        /// Subscribes to the legacy-firmware MiniCam sequence and writes every available metadata field.
+        /// </summary>
+        /// <param name="source">The legacy-firmware MiniCam frames to save.</param>
+        /// <returns>An observable sequence that passes through every source frame.</returns>
+        public IObservable<LegacyFrameMiniCam> Process(IObservable<LegacyFrameMiniCam> source)
+        {
+            return Observable.Create<LegacyFrameMiniCam>(observer =>
+            {
+                Recorder recorder = null;
+                var gate = new object();
+
+                var sub = source.Subscribe(frame =>
+                {
+                    try
+                    {
+                        if (CropOutputVideo)
+                        {
+                            var croppedImage = frame.Image.GetSubRect(RegionOfInterest);
+                            frame = new LegacyFrameMiniCam(
+                                croppedImage,
+                                frame.FrameNumber,
+                                frame.ReceiveTimestamp,
+                                frame.Input);
+                        }
+
+                        if (!RecordingService.IsRecording)
+                        {
+                            observer.OnNext(frame);
+                            return;
+                        }
+
+                        if (recorder == null)
+                        {
+                            int width = frame.Image.Width;
+                            int height = frame.Image.Height;
+
+                            lock (gate)
+                            {
+                                recorder ??= new Recorder(
+                                    BaseVideoName,
+                                    VideoContainer,
+                                    SegmentFrames,
+                                    width,
+                                    height,
+                                    VideoCodec,
+                                    ExtraCodecArgs,
+                                    CsvSchema.LegacyMiniCam,
+                                    deviceFolderName: DeviceFolderName,
+                                    subFolderPattern: SubFolderPattern);
+                            }
+
+                            observer.OnNext(frame);
+                            return;
+                        }
+
+                        if (!recorder.IsReady)
+                        {
+                            observer.OnNext(frame);
+                            return;
+                        }
+
+                        recorder.WriteCsv(frame);
+                        recorder.WriteVideo(frame.Image);
+                        observer.OnNext(frame);
+                    }
+                    catch (Exception ex)
+                    {
+                        observer.OnError(ex);
+                    }
+                },
+                ex => { recorder?.Dispose(); observer.OnError(ex); },
+                () => { recorder?.Dispose(); observer.OnCompleted(); });
+
+                return new CompositeDisposable(sub, Disposable.Create(() => recorder?.Dispose()));
+            });
+        }
+
+        enum CsvSchema
+        {
+            CurrentV4,
+            LegacyV4,
+            CurrentMiniCam,
+            LegacyMiniCam
+        }
+
         // ------------------------- helper -------------------------------
         sealed class Recorder : IDisposable
         {
             readonly StreamWriter csvWriter;
             readonly Process ffmpeg;
-            readonly ImageWriter pipeWriter;
+            readonly ReadyImageWriter pipeWriter;
             readonly string pipeName;
             readonly Subject<IplImage> frameQueue;
             readonly IDisposable pipeSubscription;
-            readonly bool writeQuaternion;
-            readonly bool writeInput;
             int frameCounter;
+
+            public bool IsReady => pipeWriter.IsReady;
 
             /// <summary>
             /// Initializes a new <see cref="Recorder"/> instance, creates the output folder, opens the CSV writer,
@@ -233,16 +438,21 @@ namespace UCLAMiniscope
             /// <param name="height">Frame height in pixels.</param>
             /// <param name="videoCodec">FFmpeg codec name (e.g. ffv1).</param>
             /// <param name="extraCodecArgs">Additional FFmpeg arguments.</param>
-            /// <param name="writeQuaternion">Whether to write quaternion columns to the CSV.</param>
-            /// <param name="writeInput">Whether to write the Input column to the CSV.</param>
-            /// <param name="hasQuaternion">Whether the source frame type carries quaternion data.</param>
+            /// <param name="csvSchema">Metadata schema determined by the input frame type.</param>
             /// <param name="deviceFolderName">Device subfolder name inside the output path.</param>
             /// <param name="subFolderPattern">Subfolder pattern supporting {mouseID}, {date}, and {time} tokens.</param>
-            public Recorder(string baseName, string videoContainer, int segmentFrames, int width, int height, string videoCodec, string extraCodecArgs, bool writeQuaternion, bool writeInput, bool hasQuaternion, string deviceFolderName, string subFolderPattern)
+            public Recorder(
+                string baseName,
+                string videoContainer,
+                int segmentFrames,
+                int width,
+                int height,
+                string videoCodec,
+                string extraCodecArgs,
+                CsvSchema csvSchema,
+                string deviceFolderName,
+                string subFolderPattern)
             {
-                this.writeQuaternion = writeQuaternion && hasQuaternion;
-                this.writeInput = writeInput;
-
                 // folder creation
                 string mouseID = MouseInfoService.MouseID;
                 string rootPath = MouseInfoService.RootPath;
@@ -263,16 +473,22 @@ namespace UCLAMiniscope
                 // Sanitize base name
                 baseName = baseName.Replace("%d", "");
 
-                // Single CSV — optional columns appended in order: quat then input
                 csvWriter = new StreamWriter(path: Path.Combine(folder, "timestamps.csv"), append: false, encoding: Encoding.UTF8);
-                var headerBuilder = new StringBuilder("FrameNumber,TimeStamp_ms");
-                if (this.writeQuaternion) headerBuilder.Append(",qw,qx,qy,qz");
-                if (this.writeInput)      headerBuilder.Append(",Input");
-                csvWriter.WriteLine(headerBuilder.ToString());
+                string csvHeader = csvSchema switch
+                {
+                    CsvSchema.CurrentV4 => "FrameNumber,ReceiveTimestamp_ms,HardwareTimestamp_ms,qw,qx,qy,qz,Input0,Input1",
+                    CsvSchema.LegacyV4 => "FrameNumber,ReceiveTimestamp_ms,qw,qx,qy,qz,Input",
+                    CsvSchema.CurrentMiniCam => "FrameNumber,ReceiveTimestamp_ms,HardwareTimestamp_ms,Input0,Input1",
+                    CsvSchema.LegacyMiniCam => "FrameNumber,ReceiveTimestamp_ms,Input",
+                    _ => throw new ArgumentOutOfRangeException(nameof(csvSchema))
+                };
+                csvWriter.WriteLine(csvHeader);
 
+                // TODO: Consider a bounded startup buffer to preserve frames received while FFmpeg connects.
+                // Buffered frames must own their image data and keep the CSV and video sequences aligned.
                 // pipe server
                 pipeName = $@"\\.\pipe\{Guid.NewGuid():N}";
-                pipeWriter = new ImageWriter { Path = pipeName };
+                pipeWriter = new ReadyImageWriter { Path = pipeName };
                 frameQueue = new Subject<IplImage>();
                 pipeSubscription = pipeWriter.Process(frameQueue).Subscribe();
 
@@ -317,48 +533,85 @@ namespace UCLAMiniscope
             }
 
             // -------- write helpers -------------------------------------
-            /// <summary>
-            /// Writes one row to the timestamps CSV for the given frame.
-            /// </summary>
-            /// <param name="frameNumber">Zero-based index of the frame.</param>
-            /// <param name="timestamp">Elapsed time in milliseconds at the time the frame was captured.</param>
-            /// <param name="input">Digital input state recorded alongside the frame.</param>
-            /// <param name="quaternion">Optional orientation quaternion (written only when <see cref="writeQuaternion"/> is enabled).</param>
-            public void WriteCsv(ulong frameNumber, long timestamp, bool input, Vector4? quaternion)
+            public void WriteCsv(FrameIMUV4 frame)
             {
-                var row = new StringBuilder($"{frameNumber},{timestamp}");
-                if (writeQuaternion && quaternion.HasValue)
-                {
-                    var q = quaternion.Value;
-                    row.Append($",{q.W},{q.X},{q.Y},{q.Z}");
-                }
-                if (writeInput)
-                    row.Append($",{(input ? 1 : 0)}");
-                csvWriter.WriteLine(row.ToString());
+                var q = frame.Quaternion;
+                csvWriter.WriteLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0},{1},{2},{3},{4},{5},{6},{7},{8}",
+                    frame.FrameNumber,
+                    frame.ReceiveTimestamp,
+                    frame.HardwareTimestamp,
+                    q.W,
+                    q.X,
+                    q.Y,
+                    q.Z,
+                    frame.Input0 ? 1 : 0,
+                    frame.Input1 ? 1 : 0));
+            }
+
+            public void WriteCsv(LegacyFrameIMUV4 frame)
+            {
+                var q = frame.Quaternion;
+                csvWriter.WriteLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0},{1},{2},{3},{4},{5},{6}",
+                    frame.FrameNumber,
+                    frame.ReceiveTimestamp,
+                    q.W,
+                    q.X,
+                    q.Y,
+                    q.Z,
+                    frame.Input ? 1 : 0));
+            }
+
+            public void WriteCsv(FrameMiniCam frame)
+            {
+                csvWriter.WriteLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0},{1},{2},{3},{4}",
+                    frame.FrameNumber,
+                    frame.ReceiveTimestamp,
+                    frame.HardwareTimestamp,
+                    frame.Input0 ? 1 : 0,
+                    frame.Input1 ? 1 : 0));
+            }
+
+            public void WriteCsv(LegacyFrameMiniCam frame)
+            {
+                csvWriter.WriteLine(string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0},{1},{2}",
+                    frame.FrameNumber,
+                    frame.ReceiveTimestamp,
+                    frame.Input ? 1 : 0));
             }
 
             /// <summary>
-            /// Sends an image frame to FFmpeg via the named pipe. Deep-copies the first 50 frames
-            /// to ensure the pipe is ready before passing original pointers.
+            /// Sends an image frame to FFmpeg via the connected named pipe.
             /// </summary>
             /// <param name="img">The image frame to write.</param>
             public void WriteVideo(IplImage img)
             {
-                if (frameCounter < 50)
-                {
-                    // Deep copy the first few frames as the pipe writer may not be ready before next frame
-                    var safeCopy = new IplImage(img.Size, img.Depth, img.Channels);
-                    CV.Copy(img, safeCopy);
-                    frameQueue.OnNext(safeCopy);
-                }
-                else
-                {
-                    // we should be safe sending the original pointer now
-                    frameQueue.OnNext(img);
-                }
+                frameQueue.OnNext(img);
 
                 if (++frameCounter % 1000 == 0)
                     Console.WriteLine($"[Saver] wrote {frameCounter:N0} frames");
+            }
+
+            sealed class ReadyImageWriter : ImageWriter
+            {
+                int isReady;
+
+                public bool IsReady => Volatile.Read(ref isReady) != 0;
+
+                protected override BinaryWriter CreateWriter(Stream stream)
+                {
+                    var writer = base.CreateWriter(stream);
+                    Volatile.Write(ref isReady, 1);
+                    Console.WriteLine("[Saver] FFmpeg pipe connected; recording frames.");
+                    return writer;
+                }
             }
 
             // -------- cleanup -------------------------------------------

@@ -1,4 +1,7 @@
-﻿using Bonsai;
+﻿// SPDX-FileCopyrightText: 2026 Clément Bourguignon
+// SPDX-License-Identifier: MIT
+
+using Bonsai;
 using System;
 using System.ComponentModel;
 using System.Reactive.Linq;

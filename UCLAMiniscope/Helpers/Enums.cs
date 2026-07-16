@@ -1,18 +1,55 @@
-/*
-Description:
-  Enums for UCLA Miniscope configuration (gains, resolutions, binning).
-
-Author:
-  Clément Bourguignon
-  Brandon Lab @ McGill University
-  2025
-
-MIT License
-Copyright (c) 2024 Clément Bourguignon
-*/
+// SPDX-FileCopyrightText: 2024-2026 ClÃ©ment Bourguignon
+// SPDX-License-Identifier: MIT
 
 namespace UCLAMiniscope.Helpers
 {
+    /// <summary>
+    /// Specifies how Windows Media Capture handles frames that arrive while the previous
+    /// frame is still being processed.
+    /// </summary>
+    public enum FrameAcquisitionMode
+    {
+        /// <summary>
+        /// Drops intermediate frames when processing falls behind and delivers the latest frame.
+        /// </summary>
+        Realtime,
+
+        /// <summary>
+        /// Buffers frames in order until the Windows system memory limit is reached.
+        /// </summary>
+        Buffered
+    }
+
+    /// <summary>
+    /// Specifies the position of the Miniscope V4 U.FL connector relative to the animal.
+    /// </summary>
+    public enum UFLConnectorLocation
+    {
+        /// <summary>
+        /// The U.FL connector is at the front-left of the Miniscope.
+        /// The physical BNO055 axes are X down, Y back, and Z left.
+        /// </summary>
+        FrontLeft,
+
+        /// <summary>
+        /// The U.FL connector is at the front-right of the Miniscope.
+        /// The physical BNO055 axes are X down, Y left, and Z front.
+        /// </summary>
+        FrontRight,
+
+        /// <summary>
+        /// The U.FL connector is at the rear-left of the Miniscope.
+        /// The physical BNO055 axes are X down, Y right, and Z back.
+        /// </summary>
+        RearLeft,
+
+        /// <summary>
+        /// The U.FL connector is at the rear-right of the Miniscope.
+        /// The physical BNO055 axes are X down, Y front, and Z right.
+        /// </summary>
+        RearRight
+    }
+
     /// <summary>
     /// Gain settings for UCLA Miniscope V4 image sensor.
     /// </summary>
@@ -40,32 +77,32 @@ namespace UCLAMiniscope.Helpers
     public enum GainMiniCam
     {
         /// <summary>
-        /// 1× gain (Dig = 0, Mult = 0, Ana = 8).
+        /// 1Ã— gain (Dig = 0, Mult = 0, Ana = 8).
         /// </summary>
         X1 = 8,
         
         /// <summary>
-        /// 2× gain (Dig = 0, Mult = 0, Ana = 16).
+        /// 2Ã— gain (Dig = 0, Mult = 0, Ana = 16).
         /// </summary>
         X2 = 16,
         
         /// <summary>
-        /// 4× gain (Dig = 0, Mult = 0, Ana = 32).
+        /// 4Ã— gain (Dig = 0, Mult = 0, Ana = 32).
         /// </summary>
         X4 = 32,
         
         /// <summary>
-        /// 8× gain (Dig = 0, Mult = 1, Ana = 32).
+        /// 8Ã— gain (Dig = 0, Mult = 1, Ana = 32).
         /// </summary>
         X8 = 96,
         
         /// <summary>
-        /// 16× gain (Dig = 8, Mult = 1, Ana = 32).
+        /// 16Ã— gain (Dig = 8, Mult = 1, Ana = 32).
         /// </summary>
         X16 = 2144,
         
         /// <summary>
-        /// 32× gain (Dig = 24, Mult = 1, Ana = 32).
+        /// 32Ã— gain (Dig = 24, Mult = 1, Ana = 32).
         /// </summary>
         X32 = 6240,
     }
@@ -76,47 +113,47 @@ namespace UCLAMiniscope.Helpers
     public enum ResolutionPreset
     {
         /// <summary>
-        /// 608×608 resolution.
+        /// 608Ã—608 resolution.
         /// </summary>
         R608x608,
         
         /// <summary>
-        /// 752×480 resolution.
+        /// 752Ã—480 resolution.
         /// </summary>
         R752x480,
         
         /// <summary>
-        /// 800×800 resolution.
+        /// 800Ã—800 resolution.
         /// </summary>
         R800x800,
         
         /// <summary>
-        /// 1000×1000 resolution.
+        /// 1000Ã—1000 resolution.
         /// </summary>
         R1000x1000,
         
         /// <summary>
-        /// 1024×768 resolution.
+        /// 1024Ã—768 resolution.
         /// </summary>
         R1024x768,
         
         /// <summary>
-        /// 1296×972 resolution.
+        /// 1296Ã—972 resolution.
         /// </summary>
         R1296x972,
         
         /// <summary>
-        /// 1500×1500 resolution.
+        /// 1500Ã—1500 resolution.
         /// </summary>
         R1500x1500,
         
         /// <summary>
-        /// 1800×1800 resolution.
+        /// 1800Ã—1800 resolution.
         /// </summary>
         R1800x1800,
         
         /// <summary>
-        /// 2592×1944 resolution (maximum).
+        /// 2592Ã—1944 resolution (maximum).
         /// </summary>
         R2592x1944
     }
@@ -127,17 +164,17 @@ namespace UCLAMiniscope.Helpers
     public enum BinningEnum
     {
         /// <summary>
-        /// No binning (1×1).
+        /// No binning (1Ã—1).
         /// </summary>
         x1 = 1,
         
         /// <summary>
-        /// 2×2 pixel binning.
+        /// 2Ã—2 pixel binning.
         /// </summary>
         x2 = 2,
         
         /// <summary>
-        /// 4×4 pixel binning.
+        /// 4Ã—4 pixel binning.
         /// </summary>
         x4 = 4
     }
