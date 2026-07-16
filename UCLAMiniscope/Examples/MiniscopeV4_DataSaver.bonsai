@@ -1,0 +1,76 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WorkflowBuilder Version="2.9.1"
+                 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                 xmlns:p1="clr-namespace:UCLAMiniscope;assembly=UCLAMiniscope"
+                 xmlns:wie="clr-namespace:Bonsai.Windows.Input;assembly=Bonsai.Windows.Input"
+                 xmlns="https://bonsai-rx.org/2018/workflow">
+  <Workflow>
+    <Nodes>
+      <Expression xsi:type="Combinator">
+        <Combinator xsi:type="p1:SetMouse">
+          <p1:MouseID>Mouse01</p1:MouseID>
+          <p1:RootPath>C:/MiniscopeRecordings</p1:RootPath>
+        </Combinator>
+      </Expression>
+      <Expression xsi:type="Combinator">
+        <Combinator xsi:type="p1:UCLAV4">
+          <p1:LEDBrightness>0</p1:LEDBrightness>
+          <p1:FPS>30</p1:FPS>
+          <p1:Focus>0</p1:Focus>
+          <p1:Gain>Low</p1:Gain>
+          <p1:Triggered>false</p1:Triggered>
+          <p1:UFLConnectorLocation>FrontRight</p1:UFLConnectorLocation>
+          <p1:CameraIndex>0</p1:CameraIndex>
+          <p1:WaitForReconnection>true</p1:WaitForReconnection>
+          <p1:AcquisitionMode>Realtime</p1:AcquisitionMode>
+          <p1:DeviceName />
+        </Combinator>
+      </Expression>
+      <Expression xsi:type="MemberSelector">
+        <Selector>Image</Selector>
+      </Expression>
+      <Expression xsi:type="MemberSelector">
+        <Selector>Quaternion</Selector>
+      </Expression>
+      <Expression xsi:type="MemberSelector">
+        <Selector>FrameNumber</Selector>
+      </Expression>
+      <Expression xsi:type="Combinator">
+        <Combinator xsi:type="p1:UCLADataSaver">
+          <p1:SegmentFrames>0</p1:SegmentFrames>
+          <p1:BaseVideoName />
+          <p1:VideoCodec>ffv1</p1:VideoCodec>
+          <p1:ExtraCodecArgs />
+          <p1:VideoContainer>mkv</p1:VideoContainer>
+          <p1:DeviceFolderName>Miniscope</p1:DeviceFolderName>
+          <p1:SubFolderPattern>{mouseID}/{date}/{time}</p1:SubFolderPattern>
+          <p1:CropOutputVideo>false</p1:CropOutputVideo>
+          <p1:RegionOfInterest>
+            <p1:X>0</p1:X>
+            <p1:Y>0</p1:Y>
+            <p1:Width>0</p1:Width>
+            <p1:Height>0</p1:Height>
+          </p1:RegionOfInterest>
+        </Combinator>
+      </Expression>
+      <Expression xsi:type="Combinator">
+        <Combinator xsi:type="wie:KeyDown">
+          <wie:Filter>Space</wie:Filter>
+          <wie:SuppressRepetitions>false</wie:SuppressRepetitions>
+        </Combinator>
+      </Expression>
+      <Expression xsi:type="Combinator">
+        <Combinator xsi:type="p1:StartRecording">
+          <p1:SaveMetadata>false</p1:SaveMetadata>
+        </Combinator>
+      </Expression>
+    </Nodes>
+    <Edges>
+      <Edge From="1" To="2" Label="Source1" />
+      <Edge From="1" To="3" Label="Source1" />
+      <Edge From="1" To="4" Label="Source1" />
+      <Edge From="1" To="5" Label="Source1" />
+      <Edge From="6" To="7" Label="Source1" />
+    </Edges>
+  </Workflow>
+</WorkflowBuilder>

@@ -37,7 +37,7 @@ namespace UCLAMiniscope
         /// Gets or sets how many frames must pass between baseline updates.
         /// </summary>
         [Description("Number of frames before updating the baseline.")]
-        public int UpdateFrequency { get; set; } = 10;
+        public int UpdateFrequency { get; set; } = 1;
 
         /// <summary>
         /// Gets or sets the scalar gain applied to the normalized ΔF/F image before output (0.0–15.0).

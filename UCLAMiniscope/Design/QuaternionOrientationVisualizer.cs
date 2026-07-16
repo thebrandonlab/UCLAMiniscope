@@ -24,22 +24,23 @@ namespace UCLAMiniscope.Design
     public class QuaternionOrientationVisualizer : DialogTypeVisualizer
     {
         const float QuaternionNormTolerance = 0.05f;
+        const float AmbientLight = 0.45f;
 
         volatile QuatSnapshot snapshot = new QuatSnapshot(0f, 0f, 0f, 1f);
 
+        TableLayoutPanel layout;
         VisualizerCanvas canvas;
+        Label cameraLabel;
         int program;
         int vaoArrow, vboArrow, arrowVertCount;
         int vaoHead,  vboHead,  headVertCount;
         int vaoEar,   vboEar,   earVertCount;
         int aPos, aNorm;
         int uModel, uView, uProj, uColor, uLight, uAmbient;
+        float cameraYawDegrees;
         bool glReady;
 
-        static readonly Matrix4 ViewMatrix = Matrix4.LookAt(
-            new Vector3(2.6f, -0.8f, 1.2f),
-            Vector3.Zero,
-            Vector3.UnitZ);
+        static readonly Vector3 DefaultCameraPosition = new Vector3(2.6f, -0.8f, 1.2f);
         static readonly Vector3 LightDirection = new Vector3(0.7f, -0.5f, 1.0f).Normalized();
         static readonly Matrix4 EarLeftLocal = Matrix4.CreateTranslation(-0.10f, 0.30f, 0.10f);
         static readonly Matrix4 EarRightLocal = Matrix4.CreateTranslation(-0.10f, -0.30f, 0.10f);
@@ -77,13 +78,55 @@ void main() {
         /// <inheritdoc/>
         public override void Load(IServiceProvider provider)
         {
-            canvas = new VisualizerCanvas { Dock = DockStyle.Fill, Size = new Size(240, 240) };
+            layout = new TableLayoutPanel
+            {
+                ColumnCount = 1,
+                Dock = DockStyle.Fill,
+                RowCount = 2,
+                Size = new Size(240, 280)
+            };
+            layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
+
+            canvas = new VisualizerCanvas { Dock = DockStyle.Fill };
             canvas.Load        += (_, __) => InitGL();
             canvas.RenderFrame += (_, __) => Render();
             canvas.Canvas.Resize += (_, __) => UpdateProjection();
 
+            var cameraControls = new TableLayoutPanel
+            {
+                ColumnCount = 2,
+                Dock = DockStyle.Fill,
+                RowCount = 1
+            };
+            cameraControls.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            cameraControls.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+            cameraLabel = new Label
+            {
+                Anchor = AnchorStyles.Left,
+                AutoSize = true,
+                Text = "Camera: 0°"
+            };
+            var cameraSlider = new TrackBar
+            {
+                Dock = DockStyle.Fill,
+                LargeChange = 15,
+                Maximum = 180,
+                Minimum = -180,
+                SmallChange = 5,
+                TickFrequency = 45
+            };
+            cameraSlider.ValueChanged += (_, __) => UpdateCamera(cameraSlider.Value);
+
+            cameraControls.Controls.Add(cameraLabel, 0, 0);
+            cameraControls.Controls.Add(cameraSlider, 1, 0);
+            layout.Controls.Add(canvas, 0, 0);
+            layout.Controls.Add(cameraControls, 0, 1);
+
             var svc = (IDialogTypeVisualizerService)provider.GetService(typeof(IDialogTypeVisualizerService));
-            svc?.AddControl(canvas);
+            svc?.AddControl(layout);
         }
 
         /// <inheritdoc/>
@@ -119,8 +162,10 @@ void main() {
                 GL.DeleteVertexArray(vaoEar);   GL.DeleteBuffer(vboEar);
             }
             glReady = false;
-            canvas.Dispose();
+            layout.Dispose();
+            layout = null;
             canvas = null;
+            cameraLabel = null;
         }
 
         // ── GL initialisation (fires after VisualizerCanvas.canvas_Load) ────────
@@ -140,10 +185,10 @@ void main() {
             aNorm    = GL.GetAttribLocation(program, "aNorm");
 
             GL.UseProgram(program);
-            var view = ViewMatrix;
+            var view = CreateViewMatrix(cameraYawDegrees);
             GL.UniformMatrix4(uView, false, ref view);
             GL.Uniform3(uLight, LightDirection.X, LightDirection.Y, LightDirection.Z);
-            GL.Uniform1(uAmbient, 0.20f);
+            GL.Uniform1(uAmbient, AmbientLight);
 
             // Arrow: 0.50 units long — placed at nose tip in Render
             UploadMesh(BuildArrow(16, 0.035f, 0.09f, 0.34f, 0.16f),  out vaoArrow, out vboArrow, out arrowVertCount);
@@ -156,6 +201,32 @@ void main() {
             glReady = true;
 
             UpdateProjection();
+        }
+
+        void UpdateCamera(int yawDegrees)
+        {
+            cameraYawDegrees = yawDegrees;
+            cameraLabel.Text = $"Camera: {yawDegrees}°";
+            if (!glReady) return;
+
+            canvas.MakeCurrent();
+            GL.UseProgram(program);
+            var view = CreateViewMatrix(cameraYawDegrees);
+            GL.UniformMatrix4(uView, false, ref view);
+            canvas.Canvas.Invalidate();
+        }
+
+        static Matrix4 CreateViewMatrix(float yawDegrees)
+        {
+            float yaw = MathHelper.DegreesToRadians(yawDegrees);
+            float cos = (float)Math.Cos(yaw);
+            float sin = (float)Math.Sin(yaw);
+            var cameraPosition = new Vector3(
+                DefaultCameraPosition.X * cos - DefaultCameraPosition.Y * sin,
+                DefaultCameraPosition.X * sin + DefaultCameraPosition.Y * cos,
+                DefaultCameraPosition.Z);
+
+            return Matrix4.LookAt(cameraPosition, Vector3.Zero, Vector3.UnitZ);
         }
 
         void UpdateProjection()
