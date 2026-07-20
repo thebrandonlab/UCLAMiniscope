@@ -10,7 +10,7 @@ using System.Numerics;
 // Adapted from the Open Ephys bonsai-miniscope quaternion visualizer.
 // See THIRD_PARTY_NOTICES.md in the package root.
 
-[assembly: TypeVisualizer(typeof(UCLAMiniscope.Design.OEQuaternionVisualizer), Target = typeof(Quaternion))]
+[assembly: TypeVisualizer(typeof(UCLAMiniscope.Design.TimeSeriesQuaternionVisualizer), Target = typeof(Quaternion))]
 
 namespace UCLAMiniscope.Design
 {
@@ -18,12 +18,12 @@ namespace UCLAMiniscope.Design
     /// Provides a type visualizer that displays a sequence of <see cref="Quaternion"/>
     /// values as a time series.
     /// </summary>
-    public class OEQuaternionVisualizer : TimeSeriesVisualizer
+    public class TimeSeriesQuaternionVisualizer : TimeSeriesVisualizer
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="OEQuaternionVisualizer"/> class.
+        /// Initializes a new instance of the <see cref="TimeSeriesQuaternionVisualizer"/> class.
         /// </summary>
-        public OEQuaternionVisualizer()
+        public TimeSeriesQuaternionVisualizer()
             : base(numSeries: 4)
         {
         }
