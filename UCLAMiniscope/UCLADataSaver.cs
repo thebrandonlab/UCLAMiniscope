@@ -486,7 +486,8 @@ namespace UCLAMiniscope
 
                 // TODO: Consider a bounded startup buffer to preserve frames received while FFmpeg connects.
                 // Buffered frames must own their image data and keep the CSV and video sequences aligned.
-                // pipe server
+                
+                // pipe server.
                 pipeName = $@"\\.\pipe\{Guid.NewGuid():N}";
                 pipeWriter = new ReadyImageWriter { Path = pipeName };
                 frameQueue = new Subject<IplImage>();
@@ -509,7 +510,7 @@ namespace UCLAMiniscope
                 }
 
                 string args =
-                    $"-f rawvideo -vcodec rawvideo -s {width}x{height} -r {fps} -pix_fmt gray " +
+                    $"-stats_period 5 -f rawvideo -vcodec rawvideo -s {width}x{height} -r {fps} -pix_fmt gray " +
                     $"-i {pipeName} " +
                     $"-fps_mode passthrough " +
                     $"-c:v {videoCodec} {extraCodecArgs} " +

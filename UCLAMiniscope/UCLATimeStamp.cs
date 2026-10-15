@@ -18,13 +18,13 @@ namespace UCLAMiniscope
         /// Milliseconds precision.
         /// </summary>
         ms = 1,
-        
+
         /// <summary>
         /// Ticks precision (high-resolution).
         /// </summary>
         ticks = 2,
     }
-    
+
     /// <summary>
     /// Transforms any input into a timestamp from the shared timing service.
     /// </summary>
@@ -44,15 +44,44 @@ namespace UCLAMiniscope
         /// <returns>A sequence of timestamps in the specified precision.</returns>
         public override IObservable<long> Process(IObservable<object> source)
         {
-            if (Precision == TimeType.ticks)
+            return source.Select(_ =>
             {
-                // Return the elapsed ticks
-                return source.Select(_ => TimingService.Stopwatch?.ElapsedTicks ?? 0);
-            }
-            else
+                long timestamp = Precision == TimeType.ticks
+                    ? TimingService.Stopwatch?.ElapsedTicks ?? 0
+                    : TimingService.Stopwatch?.ElapsedMilliseconds ?? 0;
+                return timestamp;
+            });
+        }
+    }
+    /// <summary>
+    /// Transforms any input into a tuple of a timestamp from the shared timing
+    /// service and the original source object, preserving the source's static type.
+    /// </summary>
+    [Combinator]
+    [Description("Emits a tuple of (timestamp, source object) from the UCLA Miniscope timing service.")]
+    public class UCLATimestampedObject
+    {
+        /// <summary>
+        /// Gets or sets the precision of the timestamp output (milliseconds or ticks).
+        /// </summary>
+        [Description("Precision: ms or ticks")]
+        public TimeType Precision { get; set; } = TimeType.ms;
+
+        /// <summary>
+        /// Combines the input sequence into tuples of (timestamp, source object).
+        /// </summary>
+        /// <typeparam name="TSource">The type of the elements in the source sequence.</typeparam>
+        /// <param name="source">The source sequence of any type.</param>
+        /// <returns>A sequence of <see cref="Tuple{T1, T2}"/> of timestamp and source object.</returns>
+        public IObservable<Tuple<long, TSource>> Process<TSource>(IObservable<TSource> source)
+        {
+            return source.Select(value =>
             {
-                return source.Select(_ => TimingService.Stopwatch?.ElapsedMilliseconds ?? 0);
-            }
+                long timestamp = Precision == TimeType.ticks
+                    ? TimingService.Stopwatch?.ElapsedTicks ?? 0
+                    : TimingService.Stopwatch?.ElapsedMilliseconds ?? 0;
+                return Tuple.Create(timestamp, value);
+            });
         }
     }
 }

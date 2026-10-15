@@ -8,7 +8,7 @@ using System.Numerics;
 using System.Reactive.Linq;
 
 
-namespace UCLAMiniscope.Helpers
+namespace UCLAMiniscope
 {
     /// <summary>
     /// Represents a frame from a UCLA Miniscope V4 using current DAQ firmware.

@@ -4,7 +4,7 @@
     <Title>UCLAMiniscope</Title>
     <Description>A package for the Bonsai visual programming language.</Description>
     <Authors>Clément Bourguignon</Authors>
-    <Copyright>Copyright © 2024-2026 Clément Bourguignon; portions copyright Open Ephys and Contributors, and Bonsai Foundation CIC and Contributors</Copyright>
+    <Copyright>Copyright © 2024-2026 Clément Bourguignon; portions copyright Open Ephys and Contributors</Copyright>
     <GeneratePackageOnBuild Condition="'$(Configuration)'=='Release'">true</GeneratePackageOnBuild>
     <PackageProjectUrl></PackageProjectUrl>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -18,7 +18,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <WarningsAsErrors>$(WarningsAsErrors);CS1591</WarningsAsErrors>
     <Features>strict</Features>
-    <Version>1.4.0</Version>
+    <Version>1.4.1</Version>
 	<LangVersion>latest</LangVersion>
   </PropertyGroup>
 
